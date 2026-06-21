@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
 from app.db.session import SessionLocal, get_db
+from app.errors import AppError
 from app.schemas.sync import SyncStatusItem, SyncStatusResponse
-from app.services.sync_service import list_sync_status, resolve_progress_percent, run_incremental
+from app.services.sync_service import is_sync_running, list_sync_status, resolve_progress_percent, run_incremental
 
 # Human: Authenticated routes to inspect USGS sync state and trigger manual incremental runs.
 # Agent: HTTP /sync/*; READS JWT, DB; CALLS sync_service; WRITES via background incremental sync.
@@ -35,20 +36,39 @@ def sync_status(
 ) -> SyncStatusResponse:
     """Return backfill and incremental sync state."""
     rows = list_sync_status(db)
+    backfill_completed = any(
+        row.key == SYNC_BACKFILL and row.status == "completed" for row in rows
+    )
     items: list[SyncStatusItem] = []
     for row in rows:
         base = SyncStatusItem.model_validate(row)
-        items.append(base.model_copy(update={"progress_percent": resolve_progress_percent(row)}))
+        items.append(
+            base.model_copy(
+                update={
+                    "progress_percent": resolve_progress_percent(
+                        row,
+                        backfill_completed=backfill_completed,
+                    )
+                }
+            )
+        )
     return SyncStatusResponse(items=items)
 
 
 # Human: Schedule a one-off incremental sync without blocking the HTTP response.
-# Agent: HTTP POST /sync/trigger; WRITES BackgroundTasks queue; RETURNS {"status": "scheduled"}; REQUIRES auth; failure modes: sync errors surface only in worker logs/DB state.
+# Agent: HTTP POST /sync/trigger; WRITES BackgroundTasks queue; RETURNS {"status": "scheduled"}; REQUIRES auth; failure modes: 409 when sync already running.
 @router.post("/trigger")
 def trigger_sync(
     _user: Annotated[str, Depends(get_current_user)],
     background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ) -> dict[str, str]:
     """Enqueue a manual incremental sync."""
+    if is_sync_running(db):
+        raise AppError(
+            "SYNC_ALREADY_RUNNING",
+            "A sync job is already running. Please wait until it finishes.",
+            status_code=409,
+        )
     background_tasks.add_task(_background_sync)
     return {"status": "scheduled"}

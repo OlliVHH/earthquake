@@ -81,12 +81,15 @@ export function DashboardPage() {
     }
   }, [queryParams, offset]);
 
-  // Human: Live sync progress — refresh status every 2s while a job reports status=running.
-  // Agent: HTTP GET /sync/status interval; CALLS loadSyncStatus; clears timer when idle.
+  // Human: Poll sync status continuously on the dashboard for live backfill progress updates.
+  // Agent: HTTP GET /sync/status every 2s; WRITES syncItems; stops when backfill completed and nothing running.
+  const backfillItem = syncItems.find((item) => item.key === "backfill");
+  const backfillDone = backfillItem?.status === "completed";
   const syncRunning = syncItems.some((item) => item.status === "running");
+  const needsLiveSyncPoll = syncRunning || !backfillDone;
 
   useEffect(() => {
-    if (!syncRunning) {
+    if (!needsLiveSyncPoll) {
       return;
     }
 
@@ -96,7 +99,16 @@ export function DashboardPage() {
     }, 2000);
 
     return () => window.clearInterval(timer);
-  }, [syncRunning, loadSyncStatus]);
+  }, [needsLiveSyncPoll, loadSyncStatus]);
+
+  // Human: One initial sync status fetch even when backfill already completed.
+  // Agent: HTTP GET /sync/status once on mount when live polling is disabled.
+  useEffect(() => {
+    if (needsLiveSyncPoll) {
+      return;
+    }
+    void loadSyncStatus();
+  }, [needsLiveSyncPoll, loadSyncStatus]);
 
   useEffect(() => {
     void loadData();
@@ -150,6 +162,18 @@ export function DashboardPage() {
     return key;
   };
 
+  // Human: Incremental sync waits until backfill completes; show 0% instead of stale 100%.
+  // Agent: READS syncItems backfill status; RETURNS rounded percent for progress bar width.
+  const displayPercent = (item: SyncStatusItem) => {
+    if (item.key === "incremental") {
+      const backfill = syncItems.find((row) => row.key === "backfill");
+      if (backfill && backfill.status !== "completed") {
+        return 0;
+      }
+    }
+    return Math.round(item.progress_percent ?? 0);
+  };
+
   return (
     <div className="dashboard">
       {/* Human: Top bar — title, language, sync trigger, logout. */}
@@ -177,11 +201,6 @@ export function DashboardPage() {
         onApply={applyFilters}
         onReset={() => {
           resetFilters();
-          setDraftFilters({
-            startDate: "", endDate: "", minMagnitude: "", maxMagnitude: "",
-            minDepth: "", maxDepth: "", minLat: "", maxLat: "", minLon: "", maxLon: "",
-            locationQuery: "", regionPreset: "", sort: "time_desc",
-          });
         }}
       />
 
@@ -204,7 +223,10 @@ export function DashboardPage() {
         <strong>{t("syncStatus")}</strong>
         <div className="sync-progress-list">
           {syncItems.map((item) => {
-            const percent = Math.round(item.progress_percent ?? 0);
+            const percent = displayPercent(item);
+            const waitingForBackfill =
+              item.key === "incremental" &&
+              syncItems.some((row) => row.key === "backfill" && row.status !== "completed");
             return (
               <div key={item.key} className="sync-progress-item">
                 <div className="sync-progress-header">
@@ -223,6 +245,9 @@ export function DashboardPage() {
                 >
                   <div className="sync-progress-fill" style={{ width: `${percent}%` }} />
                 </div>
+                {waitingForBackfill ? (
+                  <span className="sync-progress-message">{t("syncWaitingBackfill")}</span>
+                ) : null}
                 {item.message ? <span className="sync-progress-message">{item.message}</span> : null}
               </div>
             );

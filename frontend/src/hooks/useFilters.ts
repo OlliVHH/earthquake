@@ -6,29 +6,60 @@ import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { FilterState } from "../types";
 
-// Human: Empty filter defaults; sort defaults to newest-first.
-// Agent: READS as baseline for readFilters and resetFilters.
-const DEFAULTS: FilterState = {
-  startDate: "",
-  endDate: "",
-  minMagnitude: "",
-  maxMagnitude: "",
-  minDepth: "",
-  maxDepth: "",
-  minLat: "",
-  maxLat: "",
-  minLon: "",
-  maxLon: "",
-  locationQuery: "",
-  regionPreset: "",
-  sort: "time_desc",
-};
+// Human: Format a local Date as YYYY-MM-DD for HTML date inputs.
+// Agent: READS Date; RETURNS date-only string in local calendar.
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
-// Human: Parse URLSearchParams into FilterState, falling back to DEFAULTS per key.
-// Agent: READS URLSearchParams; RETURNS FilterState; WRITES none.
+// Human: Monday–Sunday bounds of the current ISO calendar week (local timezone).
+// Agent: READS system clock; RETURNS startDate/endDate strings for default filters.
+function getCurrentWeekRange(): { startDate: string; endDate: string } {
+  const today = new Date();
+  const weekday = today.getDay();
+  const daysFromMonday = weekday === 0 ? 6 : weekday - 1;
+
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - daysFromMonday);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  return {
+    startDate: formatLocalDate(monday),
+    endDate: formatLocalDate(sunday),
+  };
+}
+
+// Human: Fresh default filters — current calendar week for dates, newest-first sort.
+// Agent: CALLS getCurrentWeekRange; RETURNS FilterState; invoked on each reset/read fallback.
+export function getDefaultFilters(): FilterState {
+  const { startDate, endDate } = getCurrentWeekRange();
+  return {
+    startDate,
+    endDate,
+    minMagnitude: "",
+    maxMagnitude: "",
+    minDepth: "",
+    maxDepth: "",
+    minLat: "",
+    maxLat: "",
+    minLon: "",
+    maxLon: "",
+    locationQuery: "",
+    regionPreset: "",
+    sort: "time_desc",
+  };
+}
+
+// Human: Parse URLSearchParams into FilterState, falling back to defaults per key.
+// Agent: READS URLSearchParams; CALLS getDefaultFilters; RETURNS FilterState; WRITES none.
 function readFilters(params: URLSearchParams): FilterState {
-  const next = { ...DEFAULTS };
-  for (const key of Object.keys(DEFAULTS) as (keyof FilterState)[]) {
+  const next = getDefaultFilters();
+  for (const key of Object.keys(next) as (keyof FilterState)[]) {
     const value = params.get(key);
     if (value) {
       next[key] = value;
@@ -70,7 +101,7 @@ export function useFilters() {
     [setSearchParams],
   );
 
-  const resetFilters = useCallback(() => setFilters(DEFAULTS), [setFilters]);
+  const resetFilters = useCallback(() => setFilters(getDefaultFilters()), [setFilters]);
 
   // Human: Map UI filter keys to backend query param names and date normalization.
   // Agent: RETURNS Record for buildQuery; READS filters state.

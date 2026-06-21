@@ -33,6 +33,7 @@
   "syncBackfill": "Backsync",
   "syncIncremental": "Sync",
   "syncProgress": "{{percent}} %",
+  "syncWaitingBackfill": "Wartet auf Abschluss des Backsync …",
   "triggerSync": "Sync starten",
   "loading": "Laden…",
   "noData": "Keine Daten",

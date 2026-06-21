@@ -53,18 +53,67 @@ def _parse_time(value: str | None) -> datetime | None:
     return dt
 
 
+# Human: Strip a scalar USGS id field; empty strings become None.
+# Agent: READS raw API value; RETURNS trimmed token or None.
+def _normalize_id_token(value: Any) -> str | None:
+    if value is None:
+        return None
+    token = str(value).strip()
+    return token or None
+
+
+# Human: USGS `properties.ids` is comma-padded (e.g. ",us7000abc,at00xyz,") — first split segment is often empty.
+# Agent: READS comma-separated ids string; RETURNS first non-empty token; failure modes: all blank -> None.
+def _first_id_from_padded_list(value: Any) -> str | None:
+    if value is None:
+        return None
+    for part in str(value).split(","):
+        token = part.strip()
+        if token:
+            return token
+    return None
+
+
+# Human: Build `net` + `code` composite id when USGS exposes both (e.g. ak + 0101nll17).
+# Agent: READS properties.net/code; RETURNS concatenated id or None.
+def _composite_net_code(props: dict[str, Any]) -> str | None:
+    net = _normalize_id_token(props.get("net"))
+    code = _normalize_id_token(props.get("code"))
+    if net and code:
+        return f"{net}{code}"
+    return None
+
+
+# Human: Deterministic fallback key when USGS omits all id fields (rare); keeps one row per event.
+# Agent: READS time/coords; RETURNS synthetic event_id capped at 64 chars for DB PK.
+def _synthetic_event_id(time_utc: datetime, latitude: float, longitude: float, depth_km: float) -> str:
+    ts_ms = int(time_utc.timestamp() * 1000)
+    synthetic = f"synth-{ts_ms}-{latitude:.4f}-{longitude:.4f}-{depth_km:.2f}"
+    return synthetic[:64]
+
+
+# Human: Resolve the canonical USGS event id from GeoJSON feature id / properties.
+# Agent: READS feature.id, padded properties.ids, net+code; RETURNS stripped id or None when all blank.
+def _extract_event_id(feature: dict[str, Any], props: dict[str, Any]) -> str | None:
+    for candidate in (
+        _normalize_id_token(feature.get("id")),
+        _first_id_from_padded_list(props.get("ids")),
+        _composite_net_code(props),
+        _normalize_id_token(props.get("code")),
+    ):
+        if candidate:
+            return candidate
+    return None
+
+
 # Human: Convert one GeoJSON Feature dict into a ParsedEarthquake, skipping malformed entries.
-# Agent: READS feature dict; RETURNS ParsedEarthquake | None when coords/time/event_id missing.
+# Agent: READS feature dict; RETURNS ParsedEarthquake | None when coords/time missing; WRITES synthetic id as last resort.
 def parse_geojson_feature(feature: dict[str, Any]) -> ParsedEarthquake | None:
     """Convert one GeoJSON feature to ParsedEarthquake."""
     props = feature.get("properties") or {}
     geometry = feature.get("geometry") or {}
     coords = geometry.get("coordinates") or []
     if len(coords) < 3:
-        return None
-
-    event_id = str(props.get("ids") or props.get("code") or feature.get("id") or "")
-    if not event_id:
         return None
 
     time_raw = props.get("time")
@@ -75,6 +124,19 @@ def parse_geojson_feature(feature: dict[str, Any]) -> ParsedEarthquake | None:
         time_utc = _parse_time(time_raw)
     if time_utc is None:
         return None
+
+    latitude = float(coords[1])
+    longitude = float(coords[0])
+    depth_km = float(coords[2])
+
+    event_id = _extract_event_id(feature, props)
+    if not event_id:
+        event_id = _synthetic_event_id(time_utc, latitude, longitude, depth_km)
+        logger.warning(
+            "USGS feature missing id fields; using synthetic event_id %s (time=%s)",
+            event_id,
+            time_utc.isoformat(),
+        )
 
     updated_raw = props.get("updated")
     updated_at: datetime | None = None
@@ -87,16 +149,23 @@ def parse_geojson_feature(feature: dict[str, Any]) -> ParsedEarthquake | None:
     magnitude = float(mag) if mag is not None else None
 
     return ParsedEarthquake(
-        event_id=event_id.split(",")[0].strip(),
+        event_id=event_id,
         time_utc=time_utc,
-        latitude=float(coords[1]),
-        longitude=float(coords[0]),
-        depth_km=float(coords[2]),
+        latitude=latitude,
+        longitude=longitude,
+        depth_km=depth_km,
         magnitude=magnitude,
         mag_type=props.get("magType"),
         location_name=props.get("place"),
         updated_at=updated_at,
     )
+
+
+# Human: Final safety check before DB upsert — never insert blank primary keys.
+# Agent: READS parsed event_id string; RETURNS stripped id or None.
+def normalize_event_id(event_id: str) -> str | None:
+    token = (event_id or "").strip()
+    return token or None
 
 
 # Human: Parse a full GeoJSON FeatureCollection payload into a list of valid earthquakes.
@@ -105,10 +174,15 @@ def parse_geojson_payload(payload: dict[str, Any]) -> list[ParsedEarthquake]:
     """Parse full GeoJSON FeatureCollection."""
     features = payload.get("features") or []
     results: list[ParsedEarthquake] = []
+    skipped = 0
     for feature in features:
         parsed = parse_geojson_feature(feature)
         if parsed:
             results.append(parsed)
+        else:
+            skipped += 1
+    if skipped:
+        logger.info("Skipped %s USGS features missing time or coordinates", skipped)
     return results
 
 
