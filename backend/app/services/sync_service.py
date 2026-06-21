@@ -45,8 +45,10 @@ def _utcnow() -> datetime:
 # --- Sync state ---
 
 # Human: Clamp a raw percentage into the inclusive 0–100 range for API and UI display.
-# Agent: READS percent float; RETURNS bounded float; no I/O.
-def _clamp_percent(value: float) -> float:
+# Agent: READS percent float; RETURNS bounded float; treats None as 0.
+def _clamp_percent(value: float | None) -> float:
+    if value is None:
+        return 0.0
     return max(0.0, min(100.0, value))
 
 

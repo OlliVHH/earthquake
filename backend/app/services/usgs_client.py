@@ -106,6 +106,17 @@ def _extract_event_id(feature: dict[str, Any], props: dict[str, Any]) -> str | N
     return None
 
 
+# Human: Parse a numeric USGS field; None/invalid values return a fallback without raising.
+# Agent: READS raw JSON scalar; RETURNS float or fallback; failure modes: TypeError/ValueError -> fallback.
+def _to_float(value: Any, *, fallback: float | None = None) -> float | None:
+    if value is None:
+        return fallback
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
 # Human: Convert one GeoJSON Feature dict into a ParsedEarthquake, skipping malformed entries.
 # Agent: READS feature dict; RETURNS ParsedEarthquake | None when coords/time missing; WRITES synthetic id as last resort.
 def parse_geojson_feature(feature: dict[str, Any]) -> ParsedEarthquake | None:
@@ -125,9 +136,11 @@ def parse_geojson_feature(feature: dict[str, Any]) -> ParsedEarthquake | None:
     if time_utc is None:
         return None
 
-    latitude = float(coords[1])
-    longitude = float(coords[0])
-    depth_km = float(coords[2])
+    longitude = _to_float(coords[0])
+    latitude = _to_float(coords[1])
+    depth_km = _to_float(coords[2], fallback=0.0)
+    if longitude is None or latitude is None or depth_km is None:
+        return None
 
     event_id = _extract_event_id(feature, props)
     if not event_id:
@@ -146,7 +159,7 @@ def parse_geojson_feature(feature: dict[str, Any]) -> ParsedEarthquake | None:
         updated_at = _parse_time(updated_raw)
 
     mag = props.get("mag")
-    magnitude = float(mag) if mag is not None else None
+    magnitude = _to_float(mag)
 
     return ParsedEarthquake(
         event_id=event_id,

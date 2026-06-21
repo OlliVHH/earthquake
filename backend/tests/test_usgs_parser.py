@@ -87,6 +87,36 @@ def test_parse_geojson_feature_synthetic_id_when_all_id_fields_missing() -> None
     assert parsed.event_id.startswith("synth-")
 
 
+# Human: Null coordinate components must not crash parsing (USGS occasionally omits depth/lat/lon).
+# Agent: CALLS parse_geojson_feature; READS null depth; RETURNS ParsedEarthquake with depth 0.
+def test_parse_geojson_feature_null_depth_defaults_to_zero() -> None:
+    feature = {
+        "id": "us7000nulldepth",
+        "geometry": {"type": "Point", "coordinates": [10.0, 20.0, None]},
+        "properties": {
+            "mag": 1.2,
+            "time": 1640995200000,
+        },
+    }
+    parsed = parse_geojson_feature(feature)
+    assert parsed is not None
+    assert parsed.depth_km == 0.0
+
+
+# Human: Features with null latitude are skipped instead of aborting the whole backfill batch.
+# Agent: CALLS parse_geojson_feature; READS null latitude; RETURNS None.
+def test_parse_geojson_feature_skips_null_latitude() -> None:
+    feature = {
+        "id": "us7000badlat",
+        "geometry": {"type": "Point", "coordinates": [10.0, None, 5.0]},
+        "properties": {
+            "mag": 1.2,
+            "time": 1640995200000,
+        },
+    }
+    assert parse_geojson_feature(feature) is None
+
+
 # Human: Whitespace-only ids with no time/coords still yield None (unparseable feature).
 # Agent: CALLS parse_geojson_feature; READS invalid geometry/time; RETURNS None.
 def test_parse_geojson_feature_rejects_blank_event_id() -> None:
