@@ -6,7 +6,7 @@ Web-based earthquake data evaluation application. Imports events from the [USGS 
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy, Alembic
 - **Frontend:** React 18, Vite, MapLibre GL JS, i18n (DE/EN)
-- **Database:** MySQL 8
+- **Database:** MySQL 9
 - **Runtime:** Docker Compose
 
 ## Quick start
