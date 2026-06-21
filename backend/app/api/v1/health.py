@@ -11,10 +11,18 @@ from app.db.session import get_db
 router = APIRouter(tags=["health"])
 
 
-# Human: Liveness endpoint that confirms the API process and database are reachable.
-# Agent: HTTP GET /health; READS DB (SELECT 1); RETURNS {"status": "ok"}; failure modes: DB connection errors propagate as 500.
+# Human: Lightweight liveness probe — no DB so Docker healthcheck passes while migrations finish.
+# Agent: HTTP GET /health; RETURNS {"status": "ok"}; no DB I/O.
 @router.get("/health")
-def health(db: Session = Depends(get_db)) -> dict[str, str]:
-    """Public liveness probe with DB connectivity check."""
+def health() -> dict[str, str]:
+    """Public liveness probe for orchestration (process up)."""
+    return {"status": "ok"}
+
+
+# Human: Readiness probe including database connectivity for ops dashboards.
+# Agent: HTTP GET /health/ready; READS DB (SELECT 1); failure modes: DB errors return 500.
+@router.get("/health/ready")
+def health_ready(db: Session = Depends(get_db)) -> dict[str, str]:
+    """Readiness probe with DB connectivity check."""
     db.execute(text("SELECT 1"))
     return {"status": "ok"}
