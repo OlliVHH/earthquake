@@ -1,6 +1,6 @@
 // Human: Main analytics dashboard — filters, stats, sync status, table/map/heatmap views.
 // Agent: HTTP GET /earthquakes, /earthquakes/map, /earthquakes/stats, /sync/status; POST /sync/trigger; READS useFilters queryParams.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { apiFetch, buildQuery, setToken } from "../api/client";
@@ -23,6 +23,10 @@ export function DashboardPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { filters, setFilters, resetFilters, queryParams } = useFilters();
+  // Human: Ref mirrors filters so bbox handler stays stable across sync-status re-renders.
+  // Agent: READS filters each render; WRITES filtersRef.current; used by onBBoxChange.
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
 
   // --- Draft vs applied filters ---
   const [draftFilters, setDraftFilters] = useState<FilterState>(filters);
@@ -54,26 +58,24 @@ export function DashboardPage() {
     setDraftFilters(filters);
   }, [filters]);
 
-  // Human: Fetch list, map points, stats, and sync status for current filters and page.
-  // Agent: HTTP parallel apiFetch; WRITES list, mapPoints, stats, syncItems; failure mode — console.error, loading cleared.
-  const loadData = useCallback(async () => {
+  // Human: Fetch list, map points, and stats for current filters — sync status is polled separately.
+  // Agent: HTTP parallel apiFetch; WRITES list, mapPoints, stats; failure mode — console.error, loading cleared.
+  const loadEarthquakeData = useCallback(async () => {
     setLoading(true);
     try {
       const qs = buildQuery({ ...queryParams, limit, offset });
       const mapQs = buildQuery({ ...queryParams, limit: 10000 });
       const statsQs = buildQuery(queryParams);
 
-      const [listRes, mapRes, statsRes, syncRes] = await Promise.all([
+      const [listRes, mapRes, statsRes] = await Promise.all([
         apiFetch<EarthquakeListResponse>(`/earthquakes${qs}`),
         apiFetch<MapPointsResponse>(`/earthquakes/map${mapQs}`),
         apiFetch<EarthquakeStats>(`/earthquakes/stats${statsQs}`),
-        apiFetch<{ items: SyncStatusItem[] }>("/sync/status"),
       ]);
 
       setList(listRes);
       setMapPoints(mapRes);
       setStats(statsRes);
-      setSyncItems(syncRes.items);
     } catch (err) {
       console.error(err);
     } finally {
@@ -111,8 +113,14 @@ export function DashboardPage() {
   }, [needsLiveSyncPoll, loadSyncStatus]);
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    void loadEarthquakeData();
+  }, [loadEarthquakeData]);
+
+  // Human: Initial sync status load alongside earthquake data on first mount.
+  // Agent: HTTP GET /sync/status once; WRITES syncItems only.
+  useEffect(() => {
+    void loadSyncStatus();
+  }, [loadSyncStatus]);
 
   // Human: Apply draft filters to URL and reset pagination to first page.
   // Agent: WRITES offset 0; CALLS setFilters with draftFilters.
@@ -121,12 +129,15 @@ export function DashboardPage() {
     setFilters(draftFilters);
   };
 
-  // Human: Map draw tool updates bbox — applies immediately to URL filters.
-  // Agent: WRITES draftFilters and filters min/max lat/lon; CALLS setFilters.
-  const onBBoxChange = (bbox: Pick<FilterState, "minLat" | "maxLat" | "minLon" | "maxLon">) => {
-    setDraftFilters((prev) => ({ ...prev, ...bbox }));
-    setFilters({ ...filters, ...bbox });
-  };
+  // Human: Map draw tool updates bbox — applies immediately to URL filters; stable callback for MapView.
+  // Agent: WRITES draftFilters and filters min/max lat/lon; CALLS setFilters; READS filters via functional update.
+  const onBBoxChange = useCallback(
+    (bbox: Pick<FilterState, "minLat" | "maxLat" | "minLon" | "maxLon">) => {
+      setDraftFilters((prev) => ({ ...prev, ...bbox }));
+      setFilters({ ...filtersRef.current, ...bbox });
+    },
+    [setFilters],
+  );
 
   // Human: Clear token and redirect to login.
   // Agent: WRITES localStorage via setToken(null); CALLS navigate /login.
@@ -142,12 +153,12 @@ export function DashboardPage() {
     localStorage.setItem("earthquake_lang", lng);
   };
 
-  // Human: Trigger backend sync job then refresh dashboard data.
-  // Agent: HTTP POST /sync/trigger; CALLS loadData; failure mode — unhandled throw from apiFetch.
+  // Human: Trigger backend sync job then refresh earthquake data (not map teardown via sync poll).
+  // Agent: HTTP POST /sync/trigger; CALLS loadSyncStatus and loadEarthquakeData.
   const triggerSync = async () => {
     await apiFetch("/sync/trigger", { method: "POST" });
     void loadSyncStatus();
-    void loadData();
+    void loadEarthquakeData();
   };
 
   // Human: Map sync_state keys to localized labels for the progress panel.

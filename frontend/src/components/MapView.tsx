@@ -21,6 +21,10 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
+  // Human: Stable ref so map init effect does not re-run when parent re-renders (e.g. sync polling).
+  // Agent: READS latest onBBoxChange; WRITES onBBoxChangeRef.current each render; avoids map teardown.
+  const onBBoxChangeRef = useRef(onBBoxChange);
+  onBBoxChangeRef.current = onBBoxChange;
 
   // --- Map initialization (once) ---
   // Human: Create MapLibre map, OSM raster, navigation, and MapboxDraw for bbox.
@@ -59,18 +63,20 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
     drawRef.current = draw;
 
     // Human: Push drawn polygon bounds to parent filters on create/update.
-    // Agent: CALLS syncDrawBBox(draw, onBBoxChange).
+    // Agent: CALLS syncDrawBBox via onBBoxChangeRef so parent re-renders do not recreate the map.
     const syncBBox = () => {
       if (drawRef.current) {
-        syncDrawBBox(drawRef.current, onBBoxChange);
+        syncDrawBBox(drawRef.current, (bbox) => onBBoxChangeRef.current(bbox));
       }
     };
 
     map.on("draw.create", syncBBox);
     map.on("draw.update", syncBBox);
   // Human: Deleting draw clears spatial filter fields.
-  // Agent: CALLS onBBoxChange with empty min/max lat/lon strings.
-    map.on("draw.delete", () => onBBoxChange({ minLat: "", maxLat: "", minLon: "", maxLon: "" }));
+  // Agent: CALLS onBBoxChangeRef with empty min/max lat/lon strings.
+    map.on("draw.delete", () =>
+      onBBoxChangeRef.current({ minLat: "", maxLat: "", minLon: "", maxLon: "" }),
+    );
 
     mapRef.current = map;
 
@@ -79,7 +85,7 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
       mapRef.current = null;
       drawRef.current = null;
     };
-  }, [onBBoxChange]);
+  }, []);
 
   // --- Layer updates when points or mode change ---
   // Human: Refresh GeoJSON source and toggle heatmap vs circle visibility.
