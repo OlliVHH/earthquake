@@ -1,0 +1,31 @@
+---
+description: Docker Compose dev safety and MySQL volume protection
+alwaysApply: true
+---
+
+# Docker Compose and database safety
+
+Supplements **`data-safety.mdc`** — read both before any Compose or database operation.
+
+## Mandatory for agents
+
+- **Never run `docker compose down -v`** unless the user **explicitly** requests destruction of local database volumes.
+- Prefer **`scripts/compose-dev-down.sh`** (no `-v`) to stop the dev stack.
+- If volume removal is required: **`EARTHQUAKE_CONFIRM_DESTROY_DATA=yes scripts/compose-dev-down.sh --destroy-volumes`** with explicit user confirmation.
+
+## Compose layout (this project)
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | **Default local stack** — MySQL + FastAPI backend + sync worker + frontend (nginx) |
+
+Environment-specific values belong in `.env` (gitignored), copied from `.env.example` via `scripts/init-env.sh`.
+
+## Do not create new Compose variants
+
+- **Never add** new `docker-compose*.yml` files unless the user **explicitly** asks.
+- **Instead:** change the existing compose file, use Compose **profiles**, or drive differences with **env vars**.
+
+## Migrations
+
+- Applied migrations are **immutable**. Production fixes are **new migration files** only — never edit shipped revisions.

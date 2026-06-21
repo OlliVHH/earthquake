@@ -1,0 +1,20 @@
+---
+description: Frontend package-lock.json must be Linux-complete for Docker npm ci
+globs: frontend/package*.json
+alwaysApply: false
+---
+
+# Frontend npm lockfile (Docker / Alpine)
+
+The production frontend image runs `npm ci` on **`node:22-alpine`**.
+
+## Mandatory when changing frontend dependencies
+
+1. **Do not** commit a Windows-only `npm install` lockfile as the final artifact.
+2. Regenerate inside Alpine:
+
+```bash
+docker run --rm -v "./frontend:/app" -w /app node:22-alpine npm install
+```
+
+3. Verify: `docker build -f frontend/Dockerfile frontend`

@@ -1,0 +1,26 @@
+---
+description: Regression testing requirements when adding or changing features
+alwaysApply: true
+---
+
+# Regression testing
+
+New features must **not break existing behavior**.
+
+## Test inventory
+
+| Area | Automated checks |
+| --- | --- |
+| **Backend (`backend/`)** | `pytest` |
+| **Frontend (`frontend/`)** | `npm run build`, `npm run lint` |
+
+## Verification matrix
+
+| You changed… | Required checks |
+| --- | --- |
+| **API handler, auth** | `pytest`; extend tests for HTTP-visible behavior |
+| **SQL schema** | New Alembic migration only; `pytest` |
+| **Error responses** | API tests; confirm frontend parses errors |
+| **Vite pages, API client** | `npm run build` + `npm run lint` |
+
+Report which commands you ran when claiming completion.

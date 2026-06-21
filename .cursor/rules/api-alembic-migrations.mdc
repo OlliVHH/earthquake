@@ -1,0 +1,12 @@
+---
+description: Alembic migration rules for backend database schema
+globs: backend/alembic/**
+alwaysApply: false
+---
+
+# Alembic migrations
+
+- **New schema changes** require a **new revision file** under `backend/alembic/versions/`.
+- **Never edit** migration files that have already been applied in any environment.
+- Name revisions sequentially: `001_initial.py`, `002_add_index.py`, etc.
+- Run migrations on backend startup or via explicit `alembic upgrade head`.

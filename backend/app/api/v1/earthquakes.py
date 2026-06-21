@@ -1,0 +1,174 @@
+"""Earthquake query routes."""
+
+from datetime import datetime
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from app.auth.deps import get_current_user
+from app.db.session import get_db
+from app.schemas.earthquake import (
+    EarthquakeListResponse,
+    EarthquakeOut,
+    EarthquakeStatsResponse,
+    MapPoint,
+    MapPointsResponse,
+)
+from app.services.earthquake_query import (
+    EarthquakeFilters,
+    count_filtered,
+    query_earthquakes,
+    query_map_points,
+    query_stats,
+)
+from app.services.region_presets import REGION_PRESETS
+
+router = APIRouter(prefix="/earthquakes", tags=["earthquakes"])
+
+
+def _parse_filters(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    min_magnitude: float | None = None,
+    max_magnitude: float | None = None,
+    min_depth: float | None = None,
+    max_depth: float | None = None,
+    min_lat: float | None = None,
+    max_lat: float | None = None,
+    min_lon: float | None = None,
+    max_lon: float | None = None,
+    location_query: str | None = None,
+    region_preset: str | None = None,
+    sort: str = "time_desc",
+) -> EarthquakeFilters:
+    return EarthquakeFilters(
+        start_date=start_date,
+        end_date=end_date,
+        min_magnitude=min_magnitude,
+        max_magnitude=max_magnitude,
+        min_depth=min_depth,
+        max_depth=max_depth,
+        min_lat=min_lat,
+        max_lat=max_lat,
+        min_lon=min_lon,
+        max_lon=max_lon,
+        location_query=location_query,
+        region_preset=region_preset,
+        sort=sort,
+    )
+
+
+@router.get("/presets")
+def list_presets(_user: Annotated[str, Depends(get_current_user)]) -> list[dict[str, str]]:
+    """Return available region preset keys for the UI."""
+    return [{"key": p.key, "label": p.key} for p in REGION_PRESETS.values()]
+
+
+@router.get("", response_model=EarthquakeListResponse)
+def list_earthquakes(
+    _user: Annotated[str, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    min_magnitude: float | None = None,
+    max_magnitude: float | None = None,
+    min_depth: float | None = None,
+    max_depth: float | None = None,
+    min_lat: float | None = None,
+    max_lat: float | None = None,
+    min_lon: float | None = None,
+    max_lon: float | None = None,
+    location_query: str | None = None,
+    region_preset: str | None = None,
+    sort: str = "time_desc",
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> EarthquakeListResponse:
+    """Paginated, filterable earthquake list."""
+    filters = _parse_filters(
+        start_date, end_date, min_magnitude, max_magnitude,
+        min_depth, max_depth, min_lat, max_lat, min_lon, max_lon,
+        location_query, region_preset, sort,
+    )
+    total = count_filtered(db, filters)
+    rows = query_earthquakes(db, filters, limit, offset)
+    return EarthquakeListResponse(
+        items=[EarthquakeOut.model_validate(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/map", response_model=MapPointsResponse)
+def map_points(
+    _user: Annotated[str, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    min_magnitude: float | None = None,
+    max_magnitude: float | None = None,
+    min_depth: float | None = None,
+    max_depth: float | None = None,
+    min_lat: float | None = None,
+    max_lat: float | None = None,
+    min_lon: float | None = None,
+    max_lon: float | None = None,
+    location_query: str | None = None,
+    region_preset: str | None = None,
+    sort: str = "time_desc",
+    limit: int = Query(default=10000, ge=1, le=50000),
+) -> MapPointsResponse:
+    """Geo points for map and heatmap layers."""
+    filters = _parse_filters(
+        start_date, end_date, min_magnitude, max_magnitude,
+        min_depth, max_depth, min_lat, max_lat, min_lon, max_lon,
+        location_query, region_preset, sort,
+    )
+    total = count_filtered(db, filters)
+    rows = query_map_points(db, filters, limit)
+    points = [
+        MapPoint(
+            event_id=r.event_id,
+            latitude=r.latitude,
+            longitude=r.longitude,
+            magnitude=r.magnitude,
+            time_utc=r.time_utc,
+            location_name=r.location_name,
+        )
+        for r in rows
+    ]
+    return MapPointsResponse(points=points, total=total)
+
+
+@router.get("/stats", response_model=EarthquakeStatsResponse)
+def earthquake_stats(
+    _user: Annotated[str, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    min_magnitude: float | None = None,
+    max_magnitude: float | None = None,
+    min_depth: float | None = None,
+    max_depth: float | None = None,
+    min_lat: float | None = None,
+    max_lat: float | None = None,
+    min_lon: float | None = None,
+    max_lon: float | None = None,
+    location_query: str | None = None,
+    region_preset: str | None = None,
+) -> EarthquakeStatsResponse:
+    """Aggregate stats for the active filter set."""
+    filters = _parse_filters(
+        start_date, end_date, min_magnitude, max_magnitude,
+        min_depth, max_depth, min_lat, max_lat, min_lon, max_lon,
+        location_query, region_preset,
+    )
+    count, max_mag, min_time, max_time = query_stats(db, filters)
+    return EarthquakeStatsResponse(
+        count=count,
+        max_magnitude=max_mag,
+        min_time=min_time,
+        max_time=max_time,
+    )

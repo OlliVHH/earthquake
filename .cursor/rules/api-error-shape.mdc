@@ -1,0 +1,23 @@
+---
+description: HTTP error JSON, logging vs client messages for backend and frontend API client
+alwaysApply: true
+---
+
+# API responses, errors, and logging
+
+HTTP API contract for **`backend/`** (Python / FastAPI) and **`frontend/src/api/client.ts`**.
+
+## Canonical error JSON
+
+- **Error HTTP bodies:** `{ "error": { "code": string, "message": string } }`
+- Status code from the same error type (`AppError` in `backend/app/errors.py`).
+- Handlers return failures via `AppError`. Do not introduce alternate error shapes without updating the frontend client in the same work.
+
+## What clients see vs what logs contain
+
+- **Responses:** `message` must stay safe for end users — no stack traces, SQL fragments, or secrets.
+- **Server logs:** use Python `logging` with enough detail to debug.
+
+## Vite client alignment
+
+- **`frontend/src/api/client.ts`** uses `getErrorMessage` and `ApiError` assuming `error.message` and `error.code`.

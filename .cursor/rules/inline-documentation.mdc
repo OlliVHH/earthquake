@@ -1,0 +1,16 @@
+---
+description: Mandatory inline comments on Python and TypeScript/TSX
+globs: "**/*.{py,ts,tsx}"
+alwaysApply: true
+---
+
+# Inline documentation (required)
+
+**Applies to `*.py`, `*.ts`, and `*.tsx` only.**
+
+All new or modified code must include clean, human-readable inline comments on non-trivial logic.
+
+## Style
+
+- Place comments **above** the code they describe.
+- Keep comments **up to date** when behavior changes.

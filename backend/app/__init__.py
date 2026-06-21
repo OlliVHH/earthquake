@@ -1,0 +1,1 @@
+"""Earthquake analytics backend application."""

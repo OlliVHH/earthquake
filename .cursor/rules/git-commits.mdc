@@ -1,0 +1,34 @@
+---
+description: Git commits only on explicit user request; TASK/FIX message format
+alwaysApply: true
+---
+
+# Git commits
+
+## Enforcement (strict)
+
+- **Create a git commit only when the user explicitly asks.**
+- **Do not** `git push`, merge, rebase, or amend unless the user **explicitly** asks.
+
+## Branch model
+
+| Branch | Role |
+|--------|------|
+| **`main`** | Stable, production-ready history |
+| **`dev`** | Integration branch |
+| **`feature/*`** | Feature development from `dev` |
+
+## Commit message structure (required)
+
+Every agent-authored commit message must begin with exactly one of:
+
+- **`TASK:`** — New work or refactors
+- **`FIX:`** — Regression fix
+- **`BUGFIX:`** — Pre-existing incorrect behavior
+- **`DOCS:`** — Documentation-only
+- **`CHORE:`** — Tooling and maintenance
+
+## Safety (never commit)
+
+- **Secrets:** Do not commit API keys, passwords, tokens, or full `.env` files.
+- **Generated artifacts:** Do not add `__pycache__/`, `node_modules/`, `dist/`, etc.

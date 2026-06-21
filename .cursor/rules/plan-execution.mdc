@@ -1,0 +1,17 @@
+---
+description: Follow implementation plans step-by-step; complete, verify, and iterate until correct
+alwaysApply: true
+---
+
+# Plan execution and completion
+
+When the user provides a plan, treat it as a **binding checklist**.
+
+## Verification
+
+- After substantive changes, run relevant checks: `pytest`, `npm run build`, `npm run lint`, Docker smoke as appropriate.
+- Confirm behavior matches the plan's intent, not only that code compiles.
+
+## Done criteria
+
+Do not say the work is complete until every plan step is addressed and checks are green (or failures documented).
