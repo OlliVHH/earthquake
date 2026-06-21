@@ -24,9 +24,15 @@ from app.services.earthquake_query import (
 )
 from app.services.region_presets import REGION_PRESETS
 
+# Human: Authenticated earthquake query endpoints for list, map, stats, and presets.
+# Agent: HTTP /earthquakes/*; READS JWT via get_current_user, DB via get_db; CALLS earthquake_query service.
 router = APIRouter(prefix="/earthquakes", tags=["earthquakes"])
 
 
+# --- Query parameter mapping ---
+
+# Human: Map flat HTTP query params into a single EarthquakeFilters dataclass for the service layer.
+# Agent: READS route query params; RETURNS EarthquakeFilters; no DB or HTTP side effects.
 def _parse_filters(
     start_date: datetime | None = None,
     end_date: datetime | None = None,
@@ -59,12 +65,18 @@ def _parse_filters(
     )
 
 
+# --- Route handlers ---
+
+# Human: Expose region preset keys so the frontend can populate filter dropdowns.
+# Agent: HTTP GET /earthquakes/presets; READS REGION_PRESETS; REQUIRES auth; RETURNS list of {key, label}.
 @router.get("/presets")
 def list_presets(_user: Annotated[str, Depends(get_current_user)]) -> list[dict[str, str]]:
     """Return available region preset keys for the UI."""
     return [{"key": p.key, "label": p.key} for p in REGION_PRESETS.values()]
 
 
+# Human: Paginated earthquake list with shared filter and sort query parameters.
+# Agent: HTTP GET /earthquakes; READS DB; CALLS count_filtered, query_earthquakes; RETURNS EarthquakeListResponse; REQUIRES auth.
 @router.get("", response_model=EarthquakeListResponse)
 def list_earthquakes(
     _user: Annotated[str, Depends(get_current_user)],
@@ -101,6 +113,8 @@ def list_earthquakes(
     )
 
 
+# Human: GeoJSON-friendly map points for map and heatmap layers (higher default limit than list).
+# Agent: HTTP GET /earthquakes/map; READS DB; CALLS count_filtered, query_map_points; RETURNS MapPointsResponse; REQUIRES auth.
 @router.get("/map", response_model=MapPointsResponse)
 def map_points(
     _user: Annotated[str, Depends(get_current_user)],
@@ -142,6 +156,8 @@ def map_points(
     return MapPointsResponse(points=points, total=total)
 
 
+# Human: Aggregate statistics (count, max magnitude, time range) for the active filter set.
+# Agent: HTTP GET /earthquakes/stats; READS DB; CALLS query_stats; RETURNS EarthquakeStatsResponse; REQUIRES auth.
 @router.get("/stats", response_model=EarthquakeStatsResponse)
 def earthquake_stats(
     _user: Annotated[str, Depends(get_current_user)],

@@ -10,6 +10,10 @@ from app.models.earthquake import Earthquake
 from app.services.region_presets import get_region_preset
 
 
+# --- Filter model ---
+
+# Human: Normalized filter set built from API query parameters before SQL execution.
+# Agent: READ by apply_filters and query_* functions; no I/O on its own.
 @dataclass
 class EarthquakeFilters:
     """Normalized filter set from API query parameters."""
@@ -29,6 +33,10 @@ class EarthquakeFilters:
     sort: str = "time_desc"
 
 
+# --- SQL filter builder ---
+
+# Human: Apply date, magnitude, depth, bbox, location, and sort constraints to a SQLAlchemy select.
+# Agent: READS EarthquakeFilters and region presets; RETURNS modified Select; no DB execution.
 def apply_filters(stmt: Select, filters: EarthquakeFilters) -> Select:
     """Apply earthquake filters to a SQLAlchemy select statement."""
     if filters.start_date:
@@ -73,12 +81,18 @@ def apply_filters(stmt: Select, filters: EarthquakeFilters) -> Select:
     return stmt
 
 
+# --- Query entrypoints ---
+
+# Human: Count earthquakes matching the filter set (for pagination totals).
+# Agent: READS DB earthquakes; CALLS apply_filters; RETURNS int count.
 def count_filtered(db: Session, filters: EarthquakeFilters) -> int:
     """Count earthquakes matching filters."""
     stmt = apply_filters(select(func.count()).select_from(Earthquake), filters)
     return int(db.scalar(stmt) or 0)
 
 
+# Human: Paginated full earthquake rows for the list API.
+# Agent: READS DB earthquakes; CALLS apply_filters; RETURNS list[Earthquake] with limit/offset.
 def query_earthquakes(
     db: Session,
     filters: EarthquakeFilters,
@@ -90,12 +104,16 @@ def query_earthquakes(
     return list(db.scalars(stmt).all())
 
 
+# Human: Cap-limited rows for map rendering (same filters, no offset).
+# Agent: READS DB earthquakes; CALLS apply_filters; RETURNS list[Earthquake] up to limit (default 50000).
 def query_map_points(db: Session, filters: EarthquakeFilters, limit: int = 50000) -> list[Earthquake]:
     """Return lightweight rows for map rendering (capped)."""
     stmt = apply_filters(select(Earthquake), filters).limit(limit)
     return list(db.scalars(stmt).all())
 
 
+# Human: Aggregate count, max magnitude, and min/max event times for the filter set.
+# Agent: READS DB earthquakes via subquery; CALLS apply_filters; RETURNS tuple[int, float|None, datetime|None, datetime|None].
 def query_stats(db: Session, filters: EarthquakeFilters) -> tuple[int, float | None, datetime | None, datetime | None]:
     """Return count, max magnitude, min/max time for filters."""
     base = apply_filters(select(Earthquake), filters).subquery()

@@ -153,6 +153,54 @@ td {
   font-size: 0.85rem;
 }
 
+.sync-progress-list {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.75rem;
+}
+
+.sync-progress-item {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sync-progress-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+
+.sync-progress-label {
+  font-weight: 600;
+}
+
+.sync-progress-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.sync-progress-track {
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.sync-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
+  border-radius: inherit;
+  transition: width 0.4s ease;
+}
+
+.sync-progress-message {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .bbox-hint {
   color: var(--muted);
   font-size: 0.85rem;

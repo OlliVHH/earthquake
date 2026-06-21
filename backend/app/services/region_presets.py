@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 
 
+# Human: Immutable named bounding box used when region_preset is set on earthquake queries.
+# Agent: READ by get_region_preset and earthquake_query.apply_filters; no I/O.
 @dataclass(frozen=True)
 class RegionPreset:
     """Named bounding box for regional filtering."""
@@ -14,6 +16,8 @@ class RegionPreset:
     max_lon: float
 
 
+# Human: Static catalog of region keys to lat/lon bounds for the frontend preset dropdown.
+# Agent: READ by list_presets API and get_region_preset; keys must match frontend filter values.
 REGION_PRESETS: dict[str, RegionPreset] = {
     "global": RegionPreset("global", -90.0, 90.0, -180.0, 180.0),
     "europe": RegionPreset("europe", 34.0, 72.0, -25.0, 45.0),
@@ -27,6 +31,8 @@ REGION_PRESETS: dict[str, RegionPreset] = {
 }
 
 
+# Human: Resolve a preset key to its bounding box, or None when key is missing/unknown.
+# Agent: READS REGION_PRESETS dict; RETURNS RegionPreset | None; no I/O.
 def get_region_preset(key: str | None) -> RegionPreset | None:
     """Return preset by key or None if unknown."""
     if not key:

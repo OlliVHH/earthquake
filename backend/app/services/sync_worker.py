@@ -13,6 +13,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
+# Human: Entrypoint loop that runs incremental USGS sync on a configurable interval until killed.
+# Agent: READS USGS_SYNC_INTERVAL_MINUTES env; CALLS SessionLocal, run_incremental each cycle; failure modes: logs exception and continues loop; DB session closed in finally.
 def main() -> None:
     """Run incremental sync on a schedule until interrupted."""
     settings = get_settings()

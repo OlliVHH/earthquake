@@ -1,11 +1,15 @@
 """Authentication helper tests."""
 
+# Human: Unit tests for admin password verification and JWT create/decode round-trip.
+# Agent: CALLS authenticate_admin, create_access_token, decode_access_token; READS Settings; no HTTP/DB.
 from passlib.hash import bcrypt
 
 from app.auth.jwt import authenticate_admin, create_access_token, decode_access_token
 from app.config import Settings
 
 
+# Human: Verify bcrypt login succeeds/fails and issued JWT decodes back to the admin username.
+# Agent: CALLS authenticate_admin (bcrypt), create_access_token, decode_access_token; READS Settings fields; WRITES token string; failure: assert on wrong password or bad decode.
 def test_authenticate_and_jwt_roundtrip() -> None:
     password = "test-password"
     settings = Settings(

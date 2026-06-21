@@ -1,8 +1,12 @@
+// Human: Derive lat/lon bounding box from MapboxDraw polygon and notify parent filters.
+// Agent: READS draw.getAll() first polygon; CALLS onBBoxChange with min/max lat/lon strings.
 /** Sync bounding box from drawn polygon to parent filters. */
 
 import type MapboxDraw from "@mapbox/mapbox-gl-draw";
 import type { FilterState } from "../types";
 
+// Human: Compute axis-aligned bbox from drawn polygon vertices and push to filter state.
+// Agent: READS MapboxDraw features; RETURNS void; failure mode — no polygon skips onBBoxChange.
 export function syncDrawBBox(
   draw: MapboxDraw,
   onBBoxChange: (bbox: Pick<FilterState, "minLat" | "maxLat" | "minLon" | "maxLon">) => void,

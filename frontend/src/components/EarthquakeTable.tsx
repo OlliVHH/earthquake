@@ -1,3 +1,5 @@
+// Human: Paginated earthquake data table using TanStack Table.
+// Agent: READS rows/total/offset/limit props; CALLS onPageChange for pagination; no HTTP.
 import {
   createColumnHelper,
   flexRender,
@@ -7,6 +9,8 @@ import {
 import { useTranslation } from "react-i18next";
 import type { Earthquake } from "../types";
 
+// Human: Column helper typed to Earthquake rows.
+// Agent: USED by column definitions below.
 const columnHelper = createColumnHelper<Earthquake>();
 
 interface Props {
@@ -17,10 +21,13 @@ interface Props {
   onPageChange: (offset: number) => void;
 }
 
-/** Sortable paginated earthquake table. */
+// Human: Renders sortable-style table with localized columns and page controls.
+// Agent: RETURNS table JSX; READS i18n.language for date formatting; WRITES none.
 export function EarthquakeTable({ rows, total, offset, limit, onPageChange }: Props) {
   const { t, i18n } = useTranslation();
 
+  // Human: Column definitions — time, location, magnitude, depth, coordinates.
+  // Agent: READS row accessors; formats dates and numbers for display.
   const columns = [
     columnHelper.accessor("time_utc", {
       header: t("time"),
@@ -51,11 +58,15 @@ export function EarthquakeTable({ rows, total, offset, limit, onPageChange }: Pr
     getCoreRowModel: getCoreRowModel(),
   });
 
+  // Human: 1-based page index and total page count from offset/limit/total.
+  // Agent: READS offset, limit, total; used for pagination label and disabled states.
   const page = Math.floor(offset / limit) + 1;
   const pageCount = Math.max(1, Math.ceil(total / limit));
 
   return (
     <div className="table-wrap">
+      {/* Human: Table header and body from TanStack row model. */}
+      {/* Agent: READS table.getHeaderGroups and getRowModel; DISPLAYS noData when empty. */}
       <table>
         <thead>
           {table.getHeaderGroups().map((hg) => (
@@ -84,6 +95,8 @@ export function EarthquakeTable({ rows, total, offset, limit, onPageChange }: Pr
           )}
         </tbody>
       </table>
+      {/* Human: Previous/next page buttons with current page indicator. */}
+      {/* Agent: CALLS onPageChange(offset ± limit); disabled at bounds. */}
       <div className="pagination">
         <button type="button" disabled={offset <= 0} onClick={() => onPageChange(Math.max(0, offset - limit))}>
           ←

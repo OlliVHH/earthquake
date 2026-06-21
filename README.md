@@ -20,7 +20,7 @@ cp .env.example .env
 docker compose up --build -d
 
 # 3. Open UI
-# http://localhost:8080  (default login: admin / admin after hash setup)
+# http://localhost:9080  (default login: admin / admin after hash setup)
 ```
 
 ### Admin password
@@ -39,7 +39,7 @@ Copy the output into `ADMIN_PASSWORD_HASH` in `.env`, then restart the backend.
 
 | Service  | URL / Port        | Description              |
 |----------|-------------------|--------------------------|
-| frontend | http://localhost:8080 | Web GUI              |
+| frontend | http://localhost:9080 | Web GUI              |
 | backend  | http://localhost:8000 | REST API             |
 | sync     | (internal)        | USGS import worker       |
 | db       | localhost:3306    | MySQL (internal in prod) |

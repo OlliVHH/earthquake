@@ -1,3 +1,5 @@
+// Human: MapLibre map with OSM tiles, earthquake layers, draw-to-filter bbox, and heatmap toggle.
+// Agent: READS points/mode/filters props; CALLS onBBoxChange; HTTP none — tiles from openstreetmap.org.
 import { syncDrawBBox } from "./mapDrawUtils";
 import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import maplibregl, { Map, Popup } from "maplibre-gl";
@@ -12,14 +14,17 @@ interface Props {
   onBBoxChange: (bbox: Pick<FilterState, "minLat" | "maxLat" | "minLon" | "maxLon">) => void;
 }
 
-/** Interactive world map with markers, heatmap, and bounding-box draw. */
+// Human: Interactive map panel — markers or heatmap, polygon draw for spatial filter.
+// Agent: WRITES map/draw refs; READS points, mode; CALLS syncDrawBBox and onBBoxChange on draw events.
 export function MapView({ points, mode, filters, onBBoxChange }: Props) {
   const { t, i18n } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
 
-  // Initialize map once
+  // --- Map initialization (once) ---
+  // Human: Create MapLibre map, OSM raster, navigation, and MapboxDraw for bbox.
+  // Agent: CALLS maplibregl.Map, MapboxDraw; WRITES mapRef/drawRef; cleanup removes map on unmount.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) {
       return;
@@ -53,6 +58,8 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
     map.addControl(draw as unknown as maplibregl.IControl, "top-left");
     drawRef.current = draw;
 
+    // Human: Push drawn polygon bounds to parent filters on create/update.
+    // Agent: CALLS syncDrawBBox(draw, onBBoxChange).
     const syncBBox = () => {
       if (drawRef.current) {
         syncDrawBBox(drawRef.current, onBBoxChange);
@@ -61,6 +68,8 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
 
     map.on("draw.create", syncBBox);
     map.on("draw.update", syncBBox);
+  // Human: Deleting draw clears spatial filter fields.
+  // Agent: CALLS onBBoxChange with empty min/max lat/lon strings.
     map.on("draw.delete", () => onBBoxChange({ minLat: "", maxLat: "", minLon: "", maxLon: "" }));
 
     mapRef.current = map;
@@ -72,7 +81,9 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
     };
   }, [onBBoxChange]);
 
-  // Update GeoJSON layers when points or mode change
+  // --- Layer updates when points or mode change ---
+  // Human: Refresh GeoJSON source and toggle heatmap vs circle visibility.
+  // Agent: READS points, mode; WRITES map layers eq-heatmap and eq-points; HTTP tile clicks show Popup.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) {
@@ -131,6 +142,8 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
           layout: { visibility: showHeatmap ? "none" : "visible" },
         });
 
+        // Human: Click marker to show popup with location, magnitude, and localized time.
+        // Agent: READS feature properties; WRITES Popup HTML to map.
         map.on("click", "eq-points", (e) => {
           const feature = e.features?.[0];
           if (!feature) {
@@ -164,15 +177,21 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
     }
   }, [points, mode, i18n.language]);
 
+  // Human: Enter polygon draw mode for spatial bbox filter.
+  // Agent: CALLS drawRef.changeMode draw_polygon.
   const startDraw = () => {
     drawRef.current?.changeMode("draw_polygon");
   };
 
+  // Human: Remove all drawn shapes and clear bbox filter fields.
+  // Agent: CALLS draw.deleteAll; CALLS onBBoxChange with empty bounds.
   const clearDraw = () => {
     drawRef.current?.deleteAll();
     onBBoxChange({ minLat: "", maxLat: "", minLon: "", maxLon: "" });
   };
 
+  // Human: Zoom map to fit all current result points.
+  // Agent: READS points; CALLS map.fitBounds; failure mode — no-op when map missing or points empty.
   const fitResults = () => {
     const map = mapRef.current;
     if (!map || points.length === 0) {
@@ -187,6 +206,8 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
 
   return (
     <div className="map-panel">
+      {/* Human: Toolbar — draw bbox, clear, fit to results, active bbox hint. */}
+      {/* Agent: CALLS startDraw, clearDraw, fitResults; READS filters for bbox hint. */}
       <div className="map-toolbar">
         <button type="button" onClick={startDraw}>{t("drawBBox")}</button>
         <button type="button" className="secondary" onClick={clearDraw}>{t("clearBBox")}</button>
@@ -197,6 +218,8 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
           </span>
         )}
       </div>
+      {/* Human: MapLibre container element — map attaches to this div ref. */}
+      {/* Agent: READS containerRef; WRITES map instance into mapRef. */}
       <div ref={containerRef} className="map-container" />
     </div>
   );

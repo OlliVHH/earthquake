@@ -17,14 +17,40 @@ from app.services.usgs_client import ParsedEarthquake, UsgsClient, USGS_LIMIT
 
 logger = logging.getLogger(__name__)
 
+# Human: sync_state row keys for backfill vs incremental USGS import pipelines.
+# Agent: READ/WRITTEN in get_or_create_sync_state and run_* functions; DB sync_state.key.
 SYNC_BACKFILL = "backfill"
 SYNC_INCREMENTAL = "incremental"
 
 
+# --- Time helpers ---
+
+# Human: Current UTC time as naive datetime (matches DB column convention).
+# Agent: RETURNS datetime; no I/O.
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+# --- Sync state ---
+
+# Human: Clamp a raw percentage into the inclusive 0–100 range for API and UI display.
+# Agent: READS percent float; RETURNS bounded float; no I/O.
+def _clamp_percent(value: float) -> float:
+    return max(0.0, min(100.0, value))
+
+
+# Human: Derive backfill completion from processed window cursor vs configured start and now.
+# Agent: READS USGS_BACKFILL_START env; READS cursor/end datetimes; RETURNS 0–100 float.
+def _backfill_percent(cursor: datetime, start: datetime, end: datetime) -> float:
+    total = (end - start).total_seconds()
+    if total <= 0:
+        return 100.0
+    done = (cursor - start).total_seconds()
+    return _clamp_percent((done / total) * 100.0)
+
+
+# Human: Load a sync_state row by key, creating an idle default if missing.
+# Agent: READS/WRITES DB sync_state; COMMITS on create; RETURNS SyncState row.
 def get_or_create_sync_state(db: Session, key: str) -> SyncState:
     """Load sync state row or create idle default."""
     state = db.get(SyncState, key)
@@ -37,6 +63,10 @@ def get_or_create_sync_state(db: Session, key: str) -> SyncState:
     return state
 
 
+# --- Earthquake upsert ---
+
+# Human: Bulk upsert parsed USGS records into earthquakes via MySQL ON DUPLICATE KEY UPDATE.
+# Agent: WRITES DB earthquakes table; COMMITS per batch; RETURNS count of records processed.
 def upsert_earthquakes(db: Session, records: Iterable[ParsedEarthquake]) -> int:
     """Bulk upsert parsed earthquakes; returns number of rows touched."""
     count = 0
@@ -74,6 +104,10 @@ def upsert_earthquakes(db: Session, records: Iterable[ParsedEarthquake]) -> int:
     return count
 
 
+# --- Adaptive window fetching ---
+
+# Human: Split a datetime range into N contiguous sub-windows for recursive USGS fetching.
+# Agent: READS start/end datetimes; RETURNS list of (start, end) tuples; no I/O.
 def _split_window(start: datetime, end: datetime, parts: int) -> list[tuple[datetime, datetime]]:
     """Split [start, end] into `parts` contiguous sub-windows."""
     if parts <= 1:
@@ -88,6 +122,8 @@ def _split_window(start: datetime, end: datetime, parts: int) -> list[tuple[date
     return windows
 
 
+# Human: Fetch a time window from USGS and upsert; subdivide recursively when USGS_LIMIT is hit.
+# Agent: CALLS UsgsClient.fetch_window, upsert_earthquakes; READS USGS_LIMIT; RETURNS total rows upserted; failure modes: empty fetch returns 0.
 def fetch_window_adaptive(
     client: UsgsClient,
     db: Session,
@@ -108,6 +144,10 @@ def fetch_window_adaptive(
     return total
 
 
+# --- Sync orchestration ---
+
+# Human: Historical import from USGS_BACKFILL_START through now in 30-day windows.
+# Agent: READS USGS_BACKFILL_START env; WRITES sync_state and earthquakes; CALLS fetch_window_adaptive; failure modes: sets sync_state.status=error and re-raises on exception.
 def run_backfill(db: Session, settings: Settings | None = None) -> None:
     """Import historical earthquakes from USGS_BACKFILL_START to now."""
     cfg = settings or get_settings()
@@ -117,6 +157,7 @@ def run_backfill(db: Session, settings: Settings | None = None) -> None:
 
     state.status = "running"
     state.message = "Backfill in progress"
+    state.progress_percent = 0.0
     db.commit()
 
     client = UsgsClient(cfg)
@@ -130,12 +171,14 @@ def run_backfill(db: Session, settings: Settings | None = None) -> None:
             window_end = min(cursor + timedelta(days=30), end)
             batch = fetch_window_adaptive(client, db, cursor, window_end)
             imported += batch
+            cursor = window_end
+            state.progress_percent = _backfill_percent(cursor, start, end)
             state.message = f"Backfill through {window_end.date()} ({imported} rows)"
             db.commit()
-            cursor = window_end
 
         state.status = "completed"
         state.last_success_at = _utcnow()
+        state.progress_percent = 100.0
         state.message = f"Backfill complete ({imported} rows imported/updated)"
         db.commit()
         logger.info("Backfill finished: %s rows", imported)
@@ -147,6 +190,8 @@ def run_backfill(db: Session, settings: Settings | None = None) -> None:
         raise
 
 
+# Human: Fetch events updated since last incremental cursor; runs backfill first if incomplete.
+# Agent: READS/WRITES sync_state; CALLS UsgsClient.fetch_window with updatedafter; WRITES earthquakes; RETURNS upsert count; failure modes: sync_state.status=error on exception.
 def run_incremental(db: Session, settings: Settings | None = None) -> int:
     """Fetch events updated since last incremental sync."""
     cfg = settings or get_settings()
@@ -158,18 +203,29 @@ def run_incremental(db: Session, settings: Settings | None = None) -> int:
 
     state.status = "running"
     state.message = "Incremental sync running"
+    state.progress_percent = 10.0
     db.commit()
 
     client = UsgsClient(cfg)
     updatedafter = state.last_updatedafter or (_utcnow() - timedelta(days=30))
 
     try:
+        state.progress_percent = 40.0
+        state.message = "Incremental sync: fetching from USGS"
+        db.commit()
+
         records = client.fetch_window(updatedafter, _utcnow(), updatedafter=updatedafter)
+
+        state.progress_percent = 75.0
+        state.message = "Incremental sync: saving to database"
+        db.commit()
+
         count = upsert_earthquakes(db, records)
         now = _utcnow()
         state.status = "idle"
         state.last_success_at = now
         state.last_updatedafter = now
+        state.progress_percent = 100.0
         state.message = f"Incremental sync OK ({count} rows)"
         db.commit()
         logger.info("Incremental sync: %s rows", count)
@@ -182,6 +238,30 @@ def run_incremental(db: Session, settings: Settings | None = None) -> int:
         raise
 
 
+# Human: Resolve a display-ready progress percentage for one sync_state row.
+# Agent: READS SyncState.status/progress_percent; RETURNS 0–100 float; failure modes: unknown keys return 0.
+def resolve_progress_percent(state: SyncState) -> float:
+    """Return UI progress percentage for a sync job."""
+    if state.progress_percent is not None:
+        return _clamp_percent(state.progress_percent)
+
+    if state.key == SYNC_BACKFILL:
+        if state.status == "completed":
+            return 100.0
+        return 0.0
+
+    if state.key == SYNC_INCREMENTAL:
+        if state.status in {"idle", "completed"} and state.last_success_at:
+            return 100.0
+        if state.status == "running":
+            return 50.0
+        return 0.0
+
+    return 0.0
+
+
+# Human: Return all sync_state rows for the status API.
+# Agent: READS DB sync_state; RETURNS list[SyncState].
 def list_sync_status(db: Session) -> list[SyncState]:
     """Return all sync state rows."""
     return list(db.scalars(select(SyncState)).all())

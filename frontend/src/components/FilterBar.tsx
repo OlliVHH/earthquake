@@ -1,6 +1,10 @@
+// Human: Filter bar UI — date, magnitude, depth, region preset, location search.
+// Agent: READS filters prop; WRITES via onChange/onApply/onReset callbacks; no HTTP.
 import { useTranslation } from "react-i18next";
 import type { FilterState } from "../types";
 
+// Human: Backend region_preset keys offered in the preset dropdown.
+// Agent: READS preset strings; empty string means no preset.
 const PRESETS = [
   "",
   "global",
@@ -21,10 +25,13 @@ interface Props {
   onReset: () => void;
 }
 
-/** Filter controls for date, magnitude, depth, region preset, and location search. */
+// Human: Dashboard filter controls — local draft until parent calls onApply.
+// Agent: CALLS onChange per field; CALLS onApply/onReset from action buttons.
 export function FilterBar({ filters, onChange, onApply, onReset }: Props) {
   const { t } = useTranslation();
 
+  // Human: Update one filter field immutably in parent draft state.
+  // Agent: CALLS onChange with spread filters and updated key.
   const update = (key: keyof FilterState, value: string) => {
     onChange({ ...filters, [key]: value });
   };
@@ -32,6 +39,8 @@ export function FilterBar({ filters, onChange, onApply, onReset }: Props) {
   return (
     <section className="filter-bar">
       <h2>{t("filters")}</h2>
+      {/* Human: Grid of filter inputs — dates, numeric ranges, preset, text search. */}
+      {/* Agent: WRITES filter fields via update(); READS filters prop. */}
       <div className="filter-grid">
         <label>
           {t("startDate")}
@@ -73,6 +82,8 @@ export function FilterBar({ filters, onChange, onApply, onReset }: Props) {
           <input type="text" value={filters.locationQuery} onChange={(e) => update("locationQuery", e.target.value)} />
         </label>
       </div>
+      {/* Human: Apply commits draft to URL; Reset clears all filters. */}
+      {/* Agent: CALLS onApply and onReset parent handlers. */}
       <div className="filter-actions">
         <button type="button" onClick={onApply}>{t("applyFilters")}</button>
         <button type="button" className="secondary" onClick={onReset}>{t("resetFilters")}</button>

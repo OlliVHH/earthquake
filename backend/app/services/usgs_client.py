@@ -14,9 +14,15 @@ from app.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
+# Human: USGS query endpoint returns at most this many events per request.
+# Agent: READ by fetch_window when deciding whether to subdivide time windows.
 USGS_LIMIT = 20000
 
 
+# --- Parsed record types ---
+
+# Human: Normalized earthquake fields extracted from one USGS GeoJSON feature.
+# Agent: READ by sync_service upsert; no I/O on its own.
 @dataclass
 class ParsedEarthquake:
     """Normalized earthquake record from USGS GeoJSON."""
@@ -32,6 +38,10 @@ class ParsedEarthquake:
     updated_at: datetime | None
 
 
+# --- GeoJSON parsing ---
+
+# Human: Parse ISO8601 timestamps from USGS property strings into naive UTC datetimes.
+# Agent: READS ISO8601 string; RETURNS datetime | None; failure modes: invalid format raises from fromisoformat.
 def _parse_time(value: str | None) -> datetime | None:
     """Parse ISO8601 timestamp from USGS properties."""
     if not value:
@@ -43,6 +53,8 @@ def _parse_time(value: str | None) -> datetime | None:
     return dt
 
 
+# Human: Convert one GeoJSON Feature dict into a ParsedEarthquake, skipping malformed entries.
+# Agent: READS feature dict; RETURNS ParsedEarthquake | None when coords/time/event_id missing.
 def parse_geojson_feature(feature: dict[str, Any]) -> ParsedEarthquake | None:
     """Convert one GeoJSON feature to ParsedEarthquake."""
     props = feature.get("properties") or {}
@@ -87,6 +99,8 @@ def parse_geojson_feature(feature: dict[str, Any]) -> ParsedEarthquake | None:
     )
 
 
+# Human: Parse a full GeoJSON FeatureCollection payload into a list of valid earthquakes.
+# Agent: READS payload dict; CALLS parse_geojson_feature per feature; RETURNS list[ParsedEarthquake].
 def parse_geojson_payload(payload: dict[str, Any]) -> list[ParsedEarthquake]:
     """Parse full GeoJSON FeatureCollection."""
     features = payload.get("features") or []
@@ -98,12 +112,20 @@ def parse_geojson_payload(payload: dict[str, Any]) -> list[ParsedEarthquake]:
     return results
 
 
+# --- HTTP client ---
+
+# Human: HTTP client for USGS FDSN Event API queries with retry on rate limits and transport errors.
+# Agent: READS USGS_BASE_URL, USGS_REQUEST_TIMEOUT_SECONDS from Settings; HTTP GET to USGS; failure modes: returns [] after retries exhausted.
 class UsgsClient:
     """HTTP client for USGS earthquake queries."""
 
+    # Human: Bind client to application settings (or explicit Settings override for tests).
+    # Agent: READS Settings via get_settings when none passed; STORES self.settings.
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
 
+    # Human: Fetch and parse earthquakes for a time window, or by updatedafter for incremental sync.
+    # Agent: HTTP GET USGS query endpoint; READS env timeout/base URL; RETURNS list[ParsedEarthquake]; failure modes: 429 retried with backoff, HTTPError logged, empty list after 4 attempts.
     def fetch_window(
         self,
         start: datetime,
@@ -139,6 +161,8 @@ class UsgsClient:
                 time.sleep(2 ** attempt)
         return []
 
+    # Human: Ask USGS how many events fall in a time window (used for adaptive window splitting).
+    # Agent: HTTP GET USGS /count endpoint; READS env timeout; RETURNS int count; failure modes: raise_for_status on HTTP errors.
     def count_window(self, start: datetime, end: datetime) -> int:
         """Return event count for window via USGS count endpoint."""
         count_url = self.settings.usgs_base_url.replace("/query", "/count")

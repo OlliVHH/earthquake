@@ -2,12 +2,14 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, Float, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
 
+# Human: One row per sync job key (e.g. backfill vs incremental); worker updates status and cursors here.
+# Agent: DB table sync_state; WRITES by sync worker; READS by admin sync status API; failure modes: stale last_updatedafter skips USGS events.
 class SyncState(Base):
     """Tracks backfill and incremental sync progress."""
 
@@ -18,3 +20,4 @@ class SyncState(Base):
     last_updatedafter: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="idle")
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress_percent: Mapped[float | None] = mapped_column(Float, nullable=True)

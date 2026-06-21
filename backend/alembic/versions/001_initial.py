@@ -3,12 +3,16 @@
 from alembic import op
 import sqlalchemy as sa
 
+# Human: Alembic revision identifiers for the first schema migration.
+# Agent: READ by Alembic migration chain; down_revision=None marks root revision.
 revision = "001_initial"
 down_revision = None
 branch_labels = None
 depends_on = None
 
 
+# Human: Create earthquakes and sync_state tables with indexes for query and sync workflows.
+# Agent: WRITES DB schema via op.create_table/create_index; failure modes: DDL errors roll back migration transaction.
 def upgrade() -> None:
     op.create_table(
         "earthquakes",
@@ -43,6 +47,8 @@ def upgrade() -> None:
     )
 
 
+# Human: Drop sync_state and earthquakes tables (reverse of upgrade).
+# Agent: WRITES DB via op.drop_table; failure modes: missing tables raise during downgrade.
 def downgrade() -> None:
     op.drop_table("sync_state")
     op.drop_table("earthquakes")

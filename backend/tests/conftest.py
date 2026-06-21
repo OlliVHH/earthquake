@@ -1,5 +1,7 @@
 """Pytest configuration."""
 
+# Human: Ensure pytest can import `app.*` from the backend package root when tests run from any cwd.
+# Agent: READS conftest path; WRITES sys.path with backend ROOT; failure: import errors if path wrong.
 import sys
 from pathlib import Path
 

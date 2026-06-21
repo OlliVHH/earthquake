@@ -9,6 +9,8 @@ from app.config import Settings, get_settings
 from app.errors import AppError
 
 
+# Human: Compare a plaintext password against a stored bcrypt hash.
+# Agent: READS hashed string; CALLS bcrypt.verify; RETURNS bool; failure modes: empty hash returns False.
 def verify_password(plain: str, hashed: str) -> bool:
     """Check plaintext password against bcrypt hash."""
     if not hashed:
@@ -16,6 +18,8 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.verify(plain, hashed)
 
 
+# Human: Validate admin username/password against Settings (hash preferred, dev plaintext fallback).
+# Agent: READS Settings (admin_username, admin_password_hash, admin_password); CALLS verify_password or plaintext compare; RETURNS bool; env vars: ADMIN_USERNAME, ADMIN_PASSWORD_HASH, ADMIN_PASSWORD.
 def authenticate_admin(username: str, password: str, settings: Settings | None = None) -> bool:
     """Validate admin credentials from settings."""
     cfg = settings or get_settings()
@@ -28,6 +32,8 @@ def authenticate_admin(username: str, password: str, settings: Settings | None =
     return password == dev_password
 
 
+# Human: Issue a signed JWT for the given subject (admin username).
+# Agent: READS JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_HOURS from Settings; WRITES signed token; RETURNS JWT string.
 def create_access_token(subject: str, settings: Settings | None = None) -> str:
     """Issue a signed JWT for the given subject."""
     cfg = settings or get_settings()
@@ -36,6 +42,8 @@ def create_access_token(subject: str, settings: Settings | None = None) -> str:
     return jwt.encode(payload, cfg.jwt_secret, algorithm=cfg.jwt_algorithm)
 
 
+# Human: Validate a JWT and return the subject (username) claim.
+# Agent: READS JWT_SECRET, JWT_ALGORITHM from Settings; CALLS jwt.decode; RETURNS subject str; failure modes: 401 INVALID_TOKEN on missing sub or JWTError (expired/signature).
 def decode_access_token(token: str, settings: Settings | None = None) -> str:
     """Validate JWT and return subject username."""
     cfg = settings or get_settings()

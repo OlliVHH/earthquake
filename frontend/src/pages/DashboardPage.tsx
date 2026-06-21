@@ -1,3 +1,5 @@
+// Human: Main analytics dashboard — filters, stats, sync status, table/map/heatmap views.
+// Agent: HTTP GET /earthquakes, /earthquakes/map, /earthquakes/stats, /sync/status; POST /sync/trigger; READS useFilters queryParams.
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -15,27 +17,45 @@ import type {
   ViewMode,
 } from "../types";
 
-/** Main analytics dashboard with table, map, and heatmap views. */
+// Human: Dashboard page component — loads data when filters or pagination change.
+// Agent: WRITES list/map/stats/sync state; CALLS apiFetch in parallel; failure mode — errors logged, UI shows stale/empty.
 export function DashboardPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { filters, setFilters, resetFilters, queryParams } = useFilters();
 
+  // --- Draft vs applied filters ---
   const [draftFilters, setDraftFilters] = useState<FilterState>(filters);
   const [view, setView] = useState<ViewMode>("table");
   const [offset, setOffset] = useState(0);
   const limit = 50;
 
+  // --- API response state ---
   const [list, setList] = useState<EarthquakeListResponse | null>(null);
   const [mapPoints, setMapPoints] = useState<MapPointsResponse | null>(null);
   const [stats, setStats] = useState<EarthquakeStats | null>(null);
   const [syncItems, setSyncItems] = useState<SyncStatusItem[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Human: Poll sync status more frequently while backfill or incremental jobs are running.
+  // Agent: HTTP GET /sync/status on interval; WRITES syncItems; READS syncItems status field.
+  const loadSyncStatus = useCallback(async () => {
+    try {
+      const syncRes = await apiFetch<{ items: SyncStatusItem[] }>("/sync/status");
+      setSyncItems(syncRes.items);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  // Human: Keep draft filter inputs aligned when URL filters change (e.g. map bbox).
+  // Agent: READS filters; WRITES draftFilters.
   useEffect(() => {
     setDraftFilters(filters);
   }, [filters]);
 
+  // Human: Fetch list, map points, stats, and sync status for current filters and page.
+  // Agent: HTTP parallel apiFetch; WRITES list, mapPoints, stats, syncItems; failure mode — console.error, loading cleared.
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -61,37 +81,79 @@ export function DashboardPage() {
     }
   }, [queryParams, offset]);
 
+  // Human: Live sync progress — refresh status every 2s while a job reports status=running.
+  // Agent: HTTP GET /sync/status interval; CALLS loadSyncStatus; clears timer when idle.
+  const syncRunning = syncItems.some((item) => item.status === "running");
+
+  useEffect(() => {
+    if (!syncRunning) {
+      return;
+    }
+
+    void loadSyncStatus();
+    const timer = window.setInterval(() => {
+      void loadSyncStatus();
+    }, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [syncRunning, loadSyncStatus]);
+
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
+  // Human: Apply draft filters to URL and reset pagination to first page.
+  // Agent: WRITES offset 0; CALLS setFilters with draftFilters.
   const applyFilters = () => {
     setOffset(0);
     setFilters(draftFilters);
   };
 
+  // Human: Map draw tool updates bbox — applies immediately to URL filters.
+  // Agent: WRITES draftFilters and filters min/max lat/lon; CALLS setFilters.
   const onBBoxChange = (bbox: Pick<FilterState, "minLat" | "maxLat" | "minLon" | "maxLon">) => {
     setDraftFilters((prev) => ({ ...prev, ...bbox }));
     setFilters({ ...filters, ...bbox });
   };
 
+  // Human: Clear token and redirect to login.
+  // Agent: WRITES localStorage via setToken(null); CALLS navigate /login.
   const logout = () => {
     setToken(null);
     navigate("/login");
   };
 
+  // Human: Switch UI language and persist preference.
+  // Agent: CALLS i18n.changeLanguage; WRITES localStorage earthquake_lang.
   const changeLanguage = (lng: string) => {
     void i18n.changeLanguage(lng);
     localStorage.setItem("earthquake_lang", lng);
   };
 
+  // Human: Trigger backend sync job then refresh dashboard data.
+  // Agent: HTTP POST /sync/trigger; CALLS loadData; failure mode — unhandled throw from apiFetch.
   const triggerSync = async () => {
     await apiFetch("/sync/trigger", { method: "POST" });
+    void loadSyncStatus();
     void loadData();
+  };
+
+  // Human: Map sync_state keys to localized labels for the progress panel.
+  // Agent: READS item.key; RETURNS i18n string for backfill vs incremental rows.
+  const syncLabel = (key: string) => {
+    if (key === "backfill") {
+      return t("syncBackfill");
+    }
+    if (key === "incremental") {
+      return t("syncIncremental");
+    }
+    return key;
   };
 
   return (
     <div className="dashboard">
+      {/* Human: Top bar — title, language, sync trigger, logout. */}
+      {/* Agent: CALLS changeLanguage, triggerSync, logout on user actions. */}
       <header className="topbar">
         <h1>{t("appTitle")}</h1>
         <div className="topbar-actions">
@@ -107,6 +169,8 @@ export function DashboardPage() {
         </div>
       </header>
 
+      {/* Human: Filter panel — edits draft until Apply. */}
+      {/* Agent: READS draftFilters; WRITES via setDraftFilters; CALLS applyFilters/resetFilters. */}
       <FilterBar
         filters={draftFilters}
         onChange={setDraftFilters}
@@ -121,6 +185,8 @@ export function DashboardPage() {
         }}
       />
 
+      {/* Human: Summary stats for filtered dataset. */}
+      {/* Agent: READS stats, loading; DISPLAYS count and max magnitude. */}
       <section className="stats-bar">
         {loading ? (
           <span>{t("loading")}</span>
@@ -132,15 +198,40 @@ export function DashboardPage() {
         )}
       </section>
 
+      {/* Human: Per-source sync job status with live percentage progress bars. */}
+      {/* Agent: READS syncItems from /sync/status; DISPLAYS progress_percent and message. */}
       <section className="sync-bar">
-        <strong>{t("syncStatus")}:</strong>
-        {syncItems.map((item) => (
-          <span key={item.key} className="sync-chip">
-            {item.key}: {item.status} {item.message ? `— ${item.message}` : ""}
-          </span>
-        ))}
+        <strong>{t("syncStatus")}</strong>
+        <div className="sync-progress-list">
+          {syncItems.map((item) => {
+            const percent = Math.round(item.progress_percent ?? 0);
+            return (
+              <div key={item.key} className="sync-progress-item">
+                <div className="sync-progress-header">
+                  <span className="sync-progress-label">{syncLabel(item.key)}</span>
+                  <span className="sync-progress-meta">
+                    {item.status} · {t("syncProgress", { percent })}
+                  </span>
+                </div>
+                <div
+                  className="sync-progress-track"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={percent}
+                  aria-label={`${syncLabel(item.key)} ${percent}%`}
+                >
+                  <div className="sync-progress-fill" style={{ width: `${percent}%` }} />
+                </div>
+                {item.message ? <span className="sync-progress-message">{item.message}</span> : null}
+              </div>
+            );
+          })}
+        </div>
       </section>
 
+      {/* Human: View mode tabs — table, map markers, heatmap. */}
+      {/* Agent: WRITES view state; toggles EarthquakeTable vs MapView. */}
       <div className="view-tabs">
         <button type="button" className={view === "table" ? "active" : ""} onClick={() => setView("table")}>{t("viewTable")}</button>
         <button type="button" className={view === "map" ? "active" : ""} onClick={() => setView("map")}>{t("viewMap")}</button>
