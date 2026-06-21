@@ -147,6 +147,33 @@ td {
   overflow: hidden;
 }
 
+/* Human: MapLibre popups use a white card — force dark text (dashboard inherits light --text). */
+/* Agent: READS .earthquake-popup-container; DISPLAYS readable labels on map marker/heatmap clicks. */
+.earthquake-popup-container .maplibregl-popup-content {
+  background: #ffffff;
+  color: #1a2332;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+}
+
+.earthquake-popup-container .maplibregl-popup-tip {
+  border-top-color: #ffffff;
+}
+
+.earthquake-popup__location {
+  font-weight: 600;
+  color: #0f1419;
+  margin-bottom: 0.35rem;
+  line-height: 1.35;
+}
+
+.earthquake-popup__row {
+  color: #334155;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 .sync-chip {
   margin-left: 0.5rem;
   color: var(--muted);

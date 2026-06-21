@@ -14,6 +14,38 @@ interface Props {
   onBBoxChange: (bbox: Pick<FilterState, "minLat" | "maxLat" | "minLon" | "maxLon">) => void;
 }
 
+// Human: Escape user/API strings before embedding in popup HTML.
+// Agent: READS raw string; RETURNS HTML-safe string for setHTML.
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Human: Build readable popup markup with fixed dark-on-white colors.
+// Agent: READS feature properties + i18n labels; RETURNS HTML string for MapLibre Popup.
+function buildEarthquakePopupHtml(
+  props: Record<string, GeoJSON.GeoJsonProperties | undefined>,
+  language: string,
+  labels: { magnitude: string; time: string },
+): string {
+  const location = String(props.location_name ?? "");
+  const magnitude = props.magnitude ?? "—";
+  const timeUtc = props.time_utc
+    ? new Date(String(props.time_utc)).toLocaleString(language)
+    : "—";
+
+  return (
+    `<div class="earthquake-popup">` +
+    `<div class="earthquake-popup__location">${escapeHtml(location)}</div>` +
+    `<div class="earthquake-popup__row">${escapeHtml(labels.magnitude)}: M ${escapeHtml(String(magnitude))}</div>` +
+    `<div class="earthquake-popup__row">${escapeHtml(labels.time)}: ${escapeHtml(timeUtc)}</div>` +
+    `</div>`
+  );
+}
+
 // Human: Interactive map panel — markers or heatmap, polygon draw for spatial filter.
 // Agent: WRITES map/draw refs; READS points, mode; CALLS syncDrawBBox and onBBoxChange on draw events.
 export function MapView({ points, mode, filters, onBBoxChange }: Props) {
@@ -25,6 +57,31 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
   // Agent: READS latest onBBoxChange; WRITES onBBoxChangeRef.current each render; avoids map teardown.
   const onBBoxChangeRef = useRef(onBBoxChange);
   onBBoxChangeRef.current = onBBoxChange;
+  const popupRef = useRef<Popup | null>(null);
+  const popupLabelsRef = useRef({ magnitude: t("magnitude"), time: t("time") });
+  const languageRef = useRef(i18n.language);
+  popupLabelsRef.current = { magnitude: t("magnitude"), time: t("time") };
+  languageRef.current = i18n.language;
+
+  // Human: Show one popup for map marker or heatmap click; closes any previous popup first.
+  // Agent: READS feature properties; WRITES MapLibre Popup; CALLS buildEarthquakePopupHtml.
+  const showEarthquakePopup = (map: Map, lngLat: maplibregl.LngLatLike, props: Record<string, unknown>) => {
+    popupRef.current?.remove();
+    popupRef.current = new Popup({
+      className: "earthquake-popup-container",
+      closeButton: true,
+      maxWidth: "320px",
+    })
+      .setLngLat(lngLat)
+      .setHTML(
+        buildEarthquakePopupHtml(
+          props as Record<string, GeoJSON.GeoJsonProperties | undefined>,
+          languageRef.current,
+          popupLabelsRef.current,
+        ),
+      )
+      .addTo(map);
+  };
 
   // --- Map initialization (once) ---
   // Human: Create MapLibre map, OSM raster, navigation, and MapboxDraw for bbox.
@@ -77,6 +134,27 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
     map.on("draw.delete", () =>
       onBBoxChangeRef.current({ minLat: "", maxLat: "", minLon: "", maxLon: "" }),
     );
+
+    // Human: Map/heatmap clicks query invisible eq-points layer for feature details popup.
+    // Agent: CALLS queryRenderedFeatures on eq-points; WRITES popup via showEarthquakePopup ref.
+    map.on("click", (e) => {
+      if (!map.getLayer("eq-points")) {
+        return;
+      }
+      const features = map.queryRenderedFeatures(e.point, { layers: ["eq-points"] });
+      const feature = features[0];
+      if (!feature) {
+        return;
+      }
+      showEarthquakePopup(map, e.lngLat, feature.properties ?? {});
+    });
+
+    map.on("mouseenter", "eq-points", () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", "eq-points", () => {
+      map.getCanvas().style.cursor = "";
+    });
 
     mapRef.current = map;
 
@@ -141,38 +219,24 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
           type: "circle",
           source: "earthquakes",
           paint: {
-            "circle-radius": ["interpolate", ["linear"], ["get", "magnitude"], 0, 3, 8, 12],
+            "circle-radius": showHeatmap
+              ? ["interpolate", ["linear"], ["get", "magnitude"], 0, 10, 8, 22]
+              : ["interpolate", ["linear"], ["get", "magnitude"], 0, 3, 8, 12],
             "circle-color": "#e74c3c",
-            "circle-opacity": 0.75,
+            "circle-opacity": showHeatmap ? 0 : 0.75,
           },
-          layout: { visibility: showHeatmap ? "none" : "visible" },
-        });
-
-        // Human: Click marker to show popup with location, magnitude, and localized time.
-        // Agent: READS feature properties; WRITES Popup HTML to map.
-        map.on("click", "eq-points", (e) => {
-          const feature = e.features?.[0];
-          if (!feature) {
-            return;
-          }
-          const props = feature.properties ?? {};
-          new Popup()
-            .setLngLat(e.lngLat)
-            .setHTML(
-              `<strong>${props.location_name ?? ""}</strong><br/>` +
-                `M ${props.magnitude ?? "—"}<br/>` +
-                `${new Date(props.time_utc).toLocaleString(i18n.language)}`,
-            )
-            .addTo(map);
-        });
-        map.on("mouseenter", "eq-points", () => {
-          map.getCanvas().style.cursor = "pointer";
-        });
-        map.on("mouseleave", "eq-points", () => {
-          map.getCanvas().style.cursor = "";
         });
       } else {
-        map.setLayoutProperty("eq-points", "visibility", showHeatmap ? "none" : "visible");
+        // Human: Keep eq-points queryable in heatmap mode via opacity 0 (visibility:none blocks clicks).
+        // Agent: WRITES circle-opacity and larger hit radius when heatmap is active.
+        map.setPaintProperty("eq-points", "circle-opacity", showHeatmap ? 0 : 0.75);
+        map.setPaintProperty(
+          "eq-points",
+          "circle-radius",
+          showHeatmap
+            ? ["interpolate", ["linear"], ["get", "magnitude"], 0, 10, 8, 22]
+            : ["interpolate", ["linear"], ["get", "magnitude"], 0, 3, 8, 12],
+        );
       }
     };
 
