@@ -15,6 +15,11 @@ export interface Earthquake {
   magnitude: number | null;
   mag_type: string | null;
   location_name: string | null;
+  author: string | null;
+  catalog: string | null;
+  contributor: string | null;
+  updated_at: string | null;
+  fetched_at: string;
 }
 
 // Human: Paginated list wrapper with total count and slice metadata.
@@ -37,6 +42,7 @@ export interface MapPoint {
   magnitude: number | null;
   time_utc: string;
   location_name: string | null;
+  emphasis?: "selected" | "nearby" | null;
 }
 
 // Human: Map endpoint response with point collection and total.
@@ -44,6 +50,27 @@ export interface MapPoint {
 export interface MapPointsResponse {
   points: MapPoint[];
   total: number;
+}
+
+// Human: Nearby earthquakes around a map/table selection within a radius.
+// Agent: HTTP response from GET /earthquakes/nearby.
+export interface EarthquakeNearbyResponse {
+  items: Earthquake[];
+  radius_km: number;
+  center_latitude: number;
+  center_longitude: number;
+}
+
+// Human: Map focus context when user selects a table row.
+// Agent: UI-only; drives MapView flyTo, highlight, and 100 km context circle.
+export interface MapFocusContext {
+  eventId: string;
+  latitude: number;
+  longitude: number;
+  radiusKm: number;
+  locationName: string | null;
+  magnitude: number | null;
+  timeUtc: string;
 }
 
 // --- Stats and sync ---

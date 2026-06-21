@@ -10,6 +10,7 @@ from app.auth.deps import get_current_user
 from app.db.session import get_db
 from app.schemas.earthquake import (
     EarthquakeListResponse,
+    EarthquakeNearbyResponse,
     EarthquakeOut,
     EarthquakeStatsResponse,
     MapPoint,
@@ -20,6 +21,7 @@ from app.services.earthquake_query import (
     count_filtered,
     query_earthquakes,
     query_map_points,
+    query_nearby_earthquakes,
     query_stats,
 )
 from app.services.region_presets import REGION_PRESETS
@@ -154,6 +156,27 @@ def map_points(
         for r in rows
     ]
     return MapPointsResponse(points=points, total=total)
+
+
+# Human: Earthquakes within a radius of a map/table selection (all DB events, no list filters).
+# Agent: HTTP GET /earthquakes/nearby; READS DB; CALLS query_nearby_earthquakes; REQUIRES auth.
+@router.get("/nearby", response_model=EarthquakeNearbyResponse)
+def nearby_earthquakes(
+    _user: Annotated[str, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+    latitude: float = Query(..., ge=-90, le=90),
+    longitude: float = Query(..., ge=-180, le=180),
+    radius_km: float = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=5000, ge=1, le=10000),
+) -> EarthquakeNearbyResponse:
+    """Return all known earthquakes within radius_km of a point."""
+    rows = query_nearby_earthquakes(db, latitude, longitude, radius_km, limit=limit)
+    return EarthquakeNearbyResponse(
+        items=[EarthquakeOut.model_validate(r) for r in rows],
+        radius_km=radius_km,
+        center_latitude=latitude,
+        center_longitude=longitude,
+    )
 
 
 # Human: Aggregate statistics (count, max magnitude, time range) for the active filter set.

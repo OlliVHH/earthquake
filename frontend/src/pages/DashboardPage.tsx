@@ -1,6 +1,6 @@
 // Human: Main analytics dashboard — filters, stats, sync status, table/map/heatmap views.
 // Agent: HTTP GET /earthquakes, /earthquakes/map, /earthquakes/stats, /sync/status; POST /sync/trigger; READS useFilters queryParams.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { apiFetch, buildQuery, setToken } from "../api/client";
@@ -9,9 +9,13 @@ import { FilterBar } from "../components/FilterBar";
 import { MapView } from "../components/MapView";
 import { useFilters } from "../hooks/useFilters";
 import type {
+  Earthquake,
   EarthquakeListResponse,
+  EarthquakeNearbyResponse,
   EarthquakeStats,
   FilterState,
+  MapFocusContext,
+  MapPoint,
   MapPointsResponse,
   SyncStatusItem,
   ViewMode,
@@ -40,6 +44,9 @@ export function DashboardPage() {
   const [stats, setStats] = useState<EarthquakeStats | null>(null);
   const [syncItems, setSyncItems] = useState<SyncStatusItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [mapFocus, setMapFocus] = useState<MapFocusContext | null>(null);
+  const [nearbyEvents, setNearbyEvents] = useState<Earthquake[]>([]);
 
   // Human: Poll sync status more frequently while backfill or incremental jobs are running.
   // Agent: HTTP GET /sync/status on interval; WRITES syncItems; READS syncItems status field.
@@ -185,6 +192,77 @@ export function DashboardPage() {
     return Math.round(item.progress_percent ?? 0);
   };
 
+  // Human: Merge filtered map points with nearby events when a table row is selected.
+  // Agent: READS mapPoints, nearbyEvents, mapFocus; RETURNS MapPoint[] with emphasis flags.
+  const displayMapPoints = useMemo((): MapPoint[] => {
+    const base = mapPoints?.points ?? [];
+    if (!mapFocus) {
+      return base;
+    }
+
+    const byId = new Map<string, MapPoint>();
+    for (const point of base) {
+      byId.set(point.event_id, { ...point, emphasis: null });
+    }
+
+    for (const event of nearbyEvents) {
+      const emphasis: MapPoint["emphasis"] =
+        event.event_id === mapFocus.eventId ? "selected" : "nearby";
+      byId.set(event.event_id, {
+        event_id: event.event_id,
+        latitude: event.latitude,
+        longitude: event.longitude,
+        magnitude: event.magnitude,
+        time_utc: event.time_utc,
+        location_name: event.location_name,
+        emphasis,
+      });
+    }
+
+    if (!byId.has(mapFocus.eventId)) {
+      byId.set(mapFocus.eventId, {
+        event_id: mapFocus.eventId,
+        latitude: mapFocus.latitude,
+        longitude: mapFocus.longitude,
+        magnitude: mapFocus.magnitude,
+        time_utc: mapFocus.timeUtc,
+        location_name: mapFocus.locationName,
+        emphasis: "selected",
+      });
+    }
+
+    return [...byId.values()];
+  }, [mapPoints, nearbyEvents, mapFocus]);
+
+  // Human: Table row click opens map, centers selection, and loads 100 km nearby events.
+  // Agent: HTTP GET /earthquakes/nearby; WRITES mapFocus, nearbyEvents, view; CALLS setView map.
+  const handleRowSelect = async (earthquake: Earthquake) => {
+    setSelectedEventId(earthquake.event_id);
+    setMapFocus({
+      eventId: earthquake.event_id,
+      latitude: earthquake.latitude,
+      longitude: earthquake.longitude,
+      radiusKm: 100,
+      locationName: earthquake.location_name,
+      magnitude: earthquake.magnitude,
+      timeUtc: earthquake.time_utc,
+    });
+    setView("map");
+
+    try {
+      const qs = buildQuery({
+        latitude: earthquake.latitude,
+        longitude: earthquake.longitude,
+        radius_km: 100,
+      });
+      const nearby = await apiFetch<EarthquakeNearbyResponse>(`/earthquakes/nearby${qs}`);
+      setNearbyEvents(nearby.items);
+    } catch (err) {
+      console.error(err);
+      setNearbyEvents([]);
+    }
+  };
+
   return (
     <div className="dashboard">
       {/* Human: Top bar — title, language, sync trigger, logout. */}
@@ -280,16 +358,23 @@ export function DashboardPage() {
           total={list?.total ?? 0}
           offset={offset}
           limit={limit}
+          selectedEventId={selectedEventId}
           onPageChange={setOffset}
+          onRowSelect={(earthquake) => void handleRowSelect(earthquake)}
         />
-      ) : (
+      ) : null}
+
+      {/* Human: Keep map mounted when table is visible so sync polling does not reset the map. */}
+      {/* Agent: DISPLAY none when view is table; READS displayMapPoints and mapFocus. */}
+      <div className={view === "table" ? "map-panel-hidden" : undefined}>
         <MapView
-          points={mapPoints?.points ?? []}
-          mode={view}
+          points={displayMapPoints}
+          mode={view === "table" ? "map" : view}
           filters={filters}
+          focus={mapFocus}
           onBBoxChange={onBBoxChange}
         />
-      )}
+      </div>
     </div>
   );
 }

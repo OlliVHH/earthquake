@@ -1,16 +1,18 @@
 // Human: MapLibre map with OSM tiles, earthquake layers, draw-to-filter bbox, and heatmap toggle.
 // Agent: READS points/mode/filters props; CALLS onBBoxChange; HTTP none — tiles from openstreetmap.org.
 import { syncDrawBBox } from "./mapDrawUtils";
+import { createRadiusCircleGeoJson } from "./mapCircleUtils";
 import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import maplibregl, { Map, Popup } from "maplibre-gl";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import type { FilterState, MapPoint, ViewMode } from "../types";
+import type { FilterState, MapFocusContext, MapPoint, ViewMode } from "../types";
 
 interface Props {
   points: MapPoint[];
   mode: ViewMode;
   filters: FilterState;
+  focus?: MapFocusContext | null;
   onBBoxChange: (bbox: Pick<FilterState, "minLat" | "maxLat" | "minLon" | "maxLon">) => void;
 }
 
@@ -46,9 +48,9 @@ function buildEarthquakePopupHtml(
   );
 }
 
-// Human: Interactive map panel — markers or heatmap, polygon draw for spatial filter.
-// Agent: WRITES map/draw refs; READS points, mode; CALLS syncDrawBBox and onBBoxChange on draw events.
-export function MapView({ points, mode, filters, onBBoxChange }: Props) {
+// Human: Interactive map panel — markers or heatmap, polygon draw for spatial filter, table focus overlay.
+// Agent: WRITES map/draw refs; READS points, mode, focus; CALLS syncDrawBBox and onBBoxChange on draw events.
+export function MapView({ points, mode, filters, focus, onBBoxChange }: Props) {
   const { t, i18n } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
@@ -184,6 +186,7 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
           magnitude: p.magnitude ?? 0,
           location_name: p.location_name,
           time_utc: p.time_utc,
+          emphasis: p.emphasis ?? "",
         },
       })),
     };
@@ -220,23 +223,81 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
           source: "earthquakes",
           paint: {
             "circle-radius": showHeatmap
-              ? ["interpolate", ["linear"], ["get", "magnitude"], 0, 10, 8, 22]
-              : ["interpolate", ["linear"], ["get", "magnitude"], 0, 3, 8, 12],
-            "circle-color": "#e74c3c",
-            "circle-opacity": showHeatmap ? 0 : 0.75,
+              ? [
+                  "match",
+                  ["get", "emphasis"],
+                  "selected",
+                  18,
+                  "nearby",
+                  12,
+                  ["interpolate", ["linear"], ["get", "magnitude"], 0, 10, 8, 22],
+                ]
+              : [
+                  "match",
+                  ["get", "emphasis"],
+                  "selected",
+                  14,
+                  "nearby",
+                  8,
+                  ["interpolate", ["linear"], ["get", "magnitude"], 0, 3, 8, 12],
+                ],
+            "circle-color": [
+              "match",
+              ["get", "emphasis"],
+              "selected",
+              "#2563eb",
+              "nearby",
+              "#f59e0b",
+              "#e74c3c",
+            ],
+            "circle-opacity": showHeatmap ? 0 : 0.85,
+            "circle-stroke-width": ["match", ["get", "emphasis"], "selected", 3, 0],
+            "circle-stroke-color": "#ffffff",
           },
         });
       } else {
         // Human: Keep eq-points queryable in heatmap mode via opacity 0 (visibility:none blocks clicks).
-        // Agent: WRITES circle-opacity and larger hit radius when heatmap is active.
-        map.setPaintProperty("eq-points", "circle-opacity", showHeatmap ? 0 : 0.75);
+        // Agent: WRITES circle-opacity, radius, and emphasis colors when heatmap is active.
+        map.setPaintProperty("eq-points", "circle-opacity", showHeatmap ? 0 : 0.85);
         map.setPaintProperty(
           "eq-points",
           "circle-radius",
           showHeatmap
-            ? ["interpolate", ["linear"], ["get", "magnitude"], 0, 10, 8, 22]
-            : ["interpolate", ["linear"], ["get", "magnitude"], 0, 3, 8, 12],
+            ? [
+                "match",
+                ["get", "emphasis"],
+                "selected",
+                18,
+                "nearby",
+                12,
+                ["interpolate", ["linear"], ["get", "magnitude"], 0, 10, 8, 22],
+              ]
+            : [
+                "match",
+                ["get", "emphasis"],
+                "selected",
+                14,
+                "nearby",
+                8,
+                ["interpolate", ["linear"], ["get", "magnitude"], 0, 3, 8, 12],
+              ],
         );
+        map.setPaintProperty("eq-points", "circle-color", [
+          "match",
+          ["get", "emphasis"],
+          "selected",
+          "#2563eb",
+          "nearby",
+          "#f59e0b",
+          "#e74c3c",
+        ]);
+        map.setPaintProperty("eq-points", "circle-stroke-width", [
+          "match",
+          ["get", "emphasis"],
+          "selected",
+          3,
+          0,
+        ]);
       }
     };
 
@@ -246,6 +307,72 @@ export function MapView({ points, mode, filters, onBBoxChange }: Props) {
       map.once("load", updateLayers);
     }
   }, [points, mode, i18n.language]);
+
+  // Human: When user selects a table row, center map, draw 100 km circle, and open popup.
+  // Agent: READS focus; WRITES focus-radius layers; CALLS flyTo and showEarthquakePopup.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const applyFocus = () => {
+      if (!focus) {
+        if (map.getLayer("focus-radius-fill")) {
+          map.setLayoutProperty("focus-radius-fill", "visibility", "none");
+        }
+        if (map.getLayer("focus-radius-line")) {
+          map.setLayoutProperty("focus-radius-line", "visibility", "none");
+        }
+        return;
+      }
+
+      const circle = createRadiusCircleGeoJson(focus.longitude, focus.latitude, focus.radiusKm);
+      if (map.getSource("focus-radius")) {
+        (map.getSource("focus-radius") as maplibregl.GeoJSONSource).setData(circle);
+      } else {
+        map.addSource("focus-radius", { type: "geojson", data: circle });
+        map.addLayer({
+          id: "focus-radius-fill",
+          type: "fill",
+          source: "focus-radius",
+          paint: { "fill-color": "#3b82f6", "fill-opacity": 0.1 },
+        });
+        map.addLayer({
+          id: "focus-radius-line",
+          type: "line",
+          source: "focus-radius",
+          paint: { "line-color": "#3b82f6", "line-width": 2, "line-opacity": 0.65 },
+        });
+      }
+
+      if (map.getLayer("focus-radius-fill")) {
+        map.setLayoutProperty("focus-radius-fill", "visibility", "visible");
+      }
+      if (map.getLayer("focus-radius-line")) {
+        map.setLayoutProperty("focus-radius-line", "visibility", "visible");
+      }
+
+      map.flyTo({
+        center: [focus.longitude, focus.latitude],
+        zoom: 7,
+        essential: true,
+      });
+
+      showEarthquakePopup(map, [focus.longitude, focus.latitude], {
+        location_name: focus.locationName,
+        magnitude: focus.magnitude,
+        time_utc: focus.timeUtc,
+        emphasis: "selected",
+      });
+    };
+
+    if (map.isStyleLoaded()) {
+      applyFocus();
+    } else {
+      map.once("load", applyFocus);
+    }
+  }, [focus]);
 
   // Human: Enter polygon draw mode for spatial bbox filter.
   // Agent: CALLS drawRef.changeMode draw_polygon.

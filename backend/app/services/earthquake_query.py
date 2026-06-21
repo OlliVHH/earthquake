@@ -1,5 +1,6 @@
 """Shared filter parameters and SQL query building for earthquakes."""
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -125,3 +126,49 @@ def query_stats(db: Session, filters: EarthquakeFilters) -> tuple[int, float | N
     )
     row = db.execute(stmt).one()
     return int(row[0] or 0), row[1], row[2], row[3]
+
+
+# --- Geo helpers ---
+
+# Human: Great-circle distance in km between two WGS84 points.
+# Agent: READS lat/lon degrees; RETURNS float km; no I/O.
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return distance in kilometers between two coordinates."""
+    rlat1, rlon1, rlat2, rlon2 = map(math.radians, (lat1, lon1, lat2, lon2))
+    dlat = rlat2 - rlat1
+    dlon = rlon2 - rlon1
+    a = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
+    return 6371.0 * 2 * math.asin(min(1.0, math.sqrt(a)))
+
+
+# Human: All earthquakes within radius_km of a center point (ignores dashboard filters).
+# Agent: READS DB earthquakes; RETURNS list[Earthquake] sorted by time desc; uses bbox prefilter + haversine.
+def query_nearby_earthquakes(
+    db: Session,
+    latitude: float,
+    longitude: float,
+    radius_km: float,
+    *,
+    limit: int = 5000,
+) -> list[Earthquake]:
+    """Return earthquakes within radius_km of the given coordinate."""
+    lat_delta = radius_km / 111.0
+    cos_lat = max(math.cos(math.radians(latitude)), 0.01)
+    lon_delta = radius_km / (111.0 * cos_lat)
+
+    stmt = (
+        select(Earthquake)
+        .where(Earthquake.latitude >= latitude - lat_delta)
+        .where(Earthquake.latitude <= latitude + lat_delta)
+        .where(Earthquake.longitude >= longitude - lon_delta)
+        .where(Earthquake.longitude <= longitude + lon_delta)
+    )
+    candidates = list(db.scalars(stmt).all())
+
+    nearby: list[Earthquake] = []
+    for row in candidates:
+        if haversine_km(latitude, longitude, row.latitude, row.longitude) <= radius_km:
+            nearby.append(row)
+
+    nearby.sort(key=lambda row: row.time_utc, reverse=True)
+    return nearby[:limit]

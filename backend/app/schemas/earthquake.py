@@ -21,6 +21,8 @@ class EarthquakeOut(BaseModel):
     author: str | None
     catalog: str | None
     contributor: str | None
+    updated_at: datetime | None
+    fetched_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -47,6 +49,17 @@ class MapPoint(BaseModel):
     magnitude: float | None
     time_utc: datetime
     location_name: str | None
+
+
+# Human: Nearby earthquakes within a radius for map context around a selected event.
+# Agent: HTTP response shape; items are EarthquakeOut rows within radius_km of center.
+class EarthquakeNearbyResponse(BaseModel):
+    """Earthquakes near a coordinate within a radius."""
+
+    items: list[EarthquakeOut]
+    radius_km: float
+    center_latitude: float
+    center_longitude: float
 
 
 # Human: Batch of map points plus total count (may exceed len(points) when capped).
