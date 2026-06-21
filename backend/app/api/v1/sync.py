@@ -9,7 +9,13 @@ from app.auth.deps import get_current_user
 from app.db.session import SessionLocal, get_db
 from app.errors import AppError
 from app.schemas.sync import SyncStatusItem, SyncStatusResponse
-from app.services.sync_service import is_sync_running, list_sync_status, resolve_progress_percent, run_incremental
+from app.services.sync_service import (
+    SYNC_BACKFILL,
+    is_sync_running,
+    list_sync_status,
+    resolve_progress_percent,
+    run_incremental,
+)
 
 # Human: Authenticated routes to inspect USGS sync state and trigger manual incremental runs.
 # Agent: HTTP /sync/*; READS JWT, DB; CALLS sync_service; WRITES via background incremental sync.
